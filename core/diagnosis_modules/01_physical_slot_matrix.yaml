@@ -1,0 +1,113 @@
+version: "2.0.0"
+module_id: "MOD_PHYSICAL_SLOT_MATRIX"
+module_name: "물리계층 320-슬롯 2D 매트릭스 통합 진단 모듈"
+category: "PHYSICAL_LAYER_SLOT"
+targeting:
+  network_mode: ["ALL"]
+  active_vendor: ["ALL"]
+  call_phase: ["DL_Traffic", "UL_Traffic", "Ping"]
+
+rules:
+  - id: "DIAG_M_01"
+    name: "MIMO 랭크 제한 (320-Slot Rank Restriction)"
+    severity: "HIGH"
+    detection:
+      target_source: "320_LAYER_MATRIX, QC_KPI"
+      condition: "Layer_Num < 3.0 in > 30% of DL slots in 320-slot grid"
+      phase: "DL_Traffic"
+    analysis:
+      root_cause: "4T4R 기지국임에도 CSI-RS 포트 간 위상 불균형 또는 실내 다중경로 반사 부족으로 랭크 1/2 고착"
+      correlation_fields:
+        - "[Call & 5G KPI PCell RF Serving SS-SINR [dB]]"
+        - "[Call & 5G KPI PCell Layer1 RI(Mode)]"
+        - "[Call & 5G KPI PCell Layer1 DL Layer Num]"
+        - "[Call & 5G KPI PCell Layer1 RI4 Rate [%]]"
+    improvement:
+      parameter: "maxMIMO-Layers"
+      recommended_action: "4T4R MIMO Layer 4 고정 및 안테나 틸트/방위각 점검"
+      vendor_specific:
+        nokia: "set NR_CELL maxMIMO-Layers=4, verify CSI-RS 3-Pool offset"
+        samsung: "MOD NRCELL: MaxMIMO-Layers=4"
+        ericsson: "set EUtranCellNR maxMIMO-Layers=4"
+
+  - id: "DIAG_M_02"
+    name: "UL 스케줄러 자원 굶주림 (320-Slot UL Starvation)"
+    severity: "HIGH"
+    detection:
+      target_source: "320_UL_RB_MATRIX, QC_KPI"
+      condition: "PUSCH_RB == 0 in > 30% of UL slots during traffic"
+      phase: "UL_Traffic"
+    analysis:
+      root_cause: "단말 BSR 보고 후 기지국 스케줄러의 Dynamic Grant 할당 큐잉 지연 및 상향 자원 결손"
+      correlation_fields:
+        - "[Call & 5G KPI PCell Layer1 UL RB Num (Avg)]"
+        - "[Call & 5G KPI PCell Layer1 UL BLER [%]]"
+        - "[Call & 5G KPI PCell RF PUSCH Power [dBm]]"
+    improvement:
+      parameter: "max-Allocated-PRB-UL"
+      recommended_action: "기지국 상향 최대 PRB 할당량 확장 및 Configured Grant 활성화"
+      vendor_specific:
+        nokia: "set NR_SCHEDULER maxPrbUl=273"
+        samsung: "MOD NRSCHED: MaxUlPrb=273"
+        ericsson: "set NrCellScheduler maxUlPrb=273"
+
+  - id: "DIAG_M_03"
+    name: "DL DMRS 오버헤드 심볼 점유 에러"
+    severity: "MEDIUM"
+    detection:
+      target_source: "320_SLIV_DURATION_MATRIX, SMART_PHONE"
+      condition: "DMRS symbol count excessive & GPS Speed < 10km/h"
+      phase: "DL_Traffic"
+    analysis:
+      root_cause: "정지/저속 주행 상태임에도 고속용 DMRS 추가 심볼(pos2)이 점유되어 PDSCH 데이터 전송률 누락"
+      correlation_fields:
+        - "[GPS Speed (km/h)]"
+        - "[Call & 5G KPI Total Info Layer2 MAC DL Throughput [Mbps]]"
+    improvement:
+      parameter: "dmrs-AdditionalPosition"
+      recommended_action: "정지/도심 구간 dmrs-AdditionalPosition을 pos1으로 최적화"
+      vendor_specific:
+        nokia: "set DMRS_CONFIG dmrsAddPos=pos1"
+        samsung: "MOD NRDMRS: AddPos=pos1"
+        ericsson: "set DmrsConfig addPos=pos1"
+
+  - id: "DIAG_M_05"
+    name: "군집형 PDSCH CRC 에러 (320-Slot Burst CRC Fail)"
+    severity: "HIGH"
+    detection:
+      target_source: "320_BLER_MATRIX, QC_KPI"
+      condition: "Continuous CRC FAIL >= 5 slots in 320-slot grid"
+      phase: "DL_Traffic"
+    analysis:
+      root_cause: "특정 프레임/슬롯에 인접 셀 동기 신호(SSB) 또는 CSI-RS Muting 충돌로 인한 버스트 에러"
+      correlation_fields:
+        - "[Call & 5G KPI PCell Layer1 DL BLER [%]]"
+        - "[Neighbor Top1 SS-RSRP]"
+        - "[Call & 5G KPI PCell RF Serving SS-SINR [dB]]"
+    improvement:
+      parameter: "csi-RS-Resource-Muting"
+      recommended_action: "인접 셀 간 CSI-RS Muting 오프셋 재배치"
+      vendor_specific:
+        nokia: "set CSI_RS_MUTING offsetPool=realign"
+        samsung: "MOD NRCSIRS: MutingOffset=Shift"
+        ericsson: "set CsiRsMuting offset=realign"
+
+  - id: "DIAG_M_06"
+    name: "PUCCH SR 대기 병목 (PUCCH SR Latency)"
+    severity: "MEDIUM"
+    detection:
+      target_source: "MAC_UL_PHY_CHA_SCHE, EVENT_DETAIL"
+      condition: "SR to PUSCH Grant delay > 4 slots"
+      phase: "Ping, UL_Traffic"
+    analysis:
+      root_cause: "단말 SR 전송 후 상향 그랜트 수신까지의 슬롯 지연으로 Ping RTT 및 UL 초기 램프업 지연"
+      correlation_fields:
+        - "[Call & SKT Speed Test Call Info Ping Event Info Ping Response]"
+        - "[Call & 5G KPI PCell RF PUCCH Power [dBm]]"
+    improvement:
+      parameter: "schedulingRequestPeriodicity"
+      recommended_action: "SR 전송 주기 단축 (sl20 -> sl10)"
+      vendor_specific:
+        nokia: "set PUCCH_CONFIG srPeriodicity=sl10"
+        samsung: "MOD NRPUCCH: SrPeriod=10"
+        ericsson: "set PucchConfig srPeriodicity=sl10"

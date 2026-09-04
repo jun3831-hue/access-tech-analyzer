@@ -1,0 +1,12 @@
+# ==========================================
+# Optis AI Analyzer - Global Configuration
+# ==========================================
+system:
+  version: "2.0.0"
+  mode: "production"
+
+
+target_environment:
+  vendor: "Nokia"          # Options: Nokia, Samsung, Ericsson
+  architecture: "NSA"      # Options: NSA, SA
+  frequency_band: "3.5GHz" # NR Band

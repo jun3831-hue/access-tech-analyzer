@@ -1,0 +1,115 @@
+version: "2.0.0"
+module_id: "MOD_NSA_ENDC_COORDINATION"
+module_name: "5G NSA (EN-DC) 및 코어망 연동 통합 진단 모듈"
+category: "NSA_ENDC_COORDINATION"
+targeting:
+  network_mode: ["5G_NSA"]
+  active_vendor: ["ALL"]
+  call_phase: ["ALL", "DL_Traffic"]
+
+rules:
+  - id: "DIAG_N_01"
+    name: "LTE 앵커 핑퐁 핸드오버 (LTE Anchor Independent Ping-Pong)"
+    severity: "HIGH"
+    detection:
+      target_source: "SMART_PHONE, EVENT_DETAIL"
+      condition: "LTE Anchor PCI returns to original cell within 5.0 seconds"
+      phase: "ALL"
+    analysis:
+      root_cause: "5G NR 링크 상태와 무관하게 LTE Anchor 핑퐁으로 인해 5G SCG Change/Reconfiguration이 강제 유발되어 데이터 단절"
+      correlation_fields:
+        - "[Call & LTE KPI PCell Serving PCI]"
+        - "[Call & LTE KPI PCell Serving RSRP [dBm]]"
+        - "[Call & 5G KPI PCell RF Serving PCI]"
+    improvement:
+      parameter: "lte-a3-Offset, lte-TimeToTrigger"
+      recommended_action: "LTE Anchor 기지국 A3 Offset +2.0dB 및 TimeToTrigger 확장"
+      vendor_specific:
+        nokia: "set LTE_HO_A3 a3Offset=3.0, ttt=ms320"
+        samsung: "MOD LTEHOA3: A3Offset=30, TTT=320"
+        ericsson: "set ReportConfigA3 a3Offset=3.0, timeToTrigger=320ms"
+
+  - id: "DIAG_N_02"
+    name: "LTE A3 Event 집행 지연 (LTE Anchor HO Latency)"
+    severity: "MEDIUM"
+    detection:
+      target_source: "SMART_PHONE, EVENT_DETAIL"
+      condition: "LTE RSRP < -105.0 dBm for > 2 seconds without HO Command"
+      phase: "ALL"
+    analysis:
+      root_cause: "LTE Anchor 핸드오버 지연으로 Anchor RLF 발생 및 5G SCG 연쇄 릴리즈"
+      correlation_fields:
+        - "[Call & LTE KPI PCell Serving RSRP [dBm]]"
+        - "[Call & LTE KPI PCell Serving TAC]"
+        - "[Call & 5G KPI PCell RF Serving SS-RSRP [dBm]]"
+    improvement:
+      parameter: "b1-Threshold-NR"
+      recommended_action: "LTE B1 Event 임계치 상향 (-110dBm -> -105dBm)"
+      vendor_specific:
+        nokia: "set LTE_EVENT_B1 b1Thresh=-105"
+        samsung: "MOD LTEB1: B1Thresh=-105"
+        ericsson: "set ReportConfigB1 b1Threshold=-105"
+
+  - id: "DIAG_N_03"
+    name: "NSA 코어 / PDCP 스플릿 전송률 병목 (PDCP Split Bearer Bottleneck)"
+    severity: "HIGH"
+    detection:
+      target_source: "QC_KPI"
+      condition: "(NR_MAC_Tput + LTE_MAC_Tput) - App_DL_Tput > 300.0 Mbps"
+      phase: "DL_Traffic"
+    analysis:
+      root_cause: "Total MAC 전송량 대비 App 속도 급락. LTE Leg와 NR Leg 간 전송 속도 격차로 PDCP Reordering 버퍼 정체"
+      correlation_fields:
+        - "[Call & 5G KPI Total Info Layer2 MAC DL Throughput [Mbps]]"
+        - "[Call & LTE KPI MAC DL Throughput [Mbps]]"
+        - "[Call & Speed Test T-put Current App Throughput [Mbps]]"
+        - "[Call & 5G KPI Total Info Layer2 PDCP DL Throughput(+Split Bearer) [Mbps]]"
+    improvement:
+      parameter: "pdcp-t-Reordering"
+      recommended_action: "PDCP t-Reordering 타이머 최적화 (ms100 -> ms50) 및 Split 임계치 조정"
+      vendor_specific:
+        nokia: "set PDCP_CONFIG tReordering=ms50"
+        samsung: "MOD NRPDCP: TReorder=50"
+        ericsson: "set PdcpConfig tReordering=50ms"
+
+  - id: "DIAG_N_04"
+    name: "CA 주파수 대역폭 결손 및 반송파 탈락 (CA Bandwidth Drop & SCell Degradation)"
+    severity: "HIGH"
+    detection:
+      target_source: "EVENT, QC_KPI"
+      condition: "Bandwidth drops below configured total (e.g. 140MHz -> 100MHz or 20MHz)"
+      phase: "DL_Traffic"
+    analysis:
+      root_cause: "1) SCell RSRP < -115dBm 무선 신호 미약으로 인한 물리적 탈락인지, 2) 트래픽 부족으로 인한 MAC Deactivation인지 구분 판정"
+      correlation_fields:
+        - "[Call & LTE KPI PCell Serving BandWidth(DL)]"
+        - "[Call & 5G KPI PCell RF Serving SS-RSRP [dBm]]"
+        - "[Call & 5G KPI PCell Layer1 DL RB Num (Avg)]"
+    improvement:
+      parameter: "sCellDeactivationTimer, a6-Offset"
+      recommended_action: "SCell 비활성화 타이머 연장 및 SCell A6 핸드오버 오프셋 튜닝"
+      vendor_specific:
+        nokia: "set SCELL_CONFIG deactTimer=infinity, a6Offset=2.0"
+        samsung: "MOD NRSCELL: DeactTimer=INF, A6Offset=20"
+        ericsson: "set SCellConfig sCellDeactivationTimer=infinity"
+
+  - id: "DIAG_N_05"
+    name: "5G SCG Failure 전수 원인 정밀 트레이스 (5G SCG Failure Full Trace)"
+    severity: "CRITICAL"
+    detection:
+      target_source: "EVENT_DETAIL, L3_MSG"
+      condition: "scgFailureInformationNR detected in L3 ASN.1 message"
+      phase: "ALL"
+    analysis:
+      root_cause: "SCG Failure 발생 시 4대 핵심 원인 코드(t310-Expiry, synchReconfigFailure-SCG, randomAccessProblem, rlc-MaxNumRetx) 전수 분해 및 기지국 로그 추적"
+      correlation_fields:
+        - "[Call & 5G KPI PCell RF Serving SS-RSRP [dBm]]"
+        - "[Call & 5G KPI PCell RF Serving SS-SINR [dB]]"
+        - "[Call & LTE KPI PCell Serving RSRP [dBm]]"
+    improvement:
+      parameter: "t310, n310, rlc-MaxNumRetx"
+      recommended_action: "T310 타이머 확장 (ms1000 -> ms2000), RLC 최대 재전송 횟수 상향"
+      vendor_specific:
+        nokia: "set RRC_TIMER t310=ms2000, n310=n20, maxRetxThreshold=t32"
+        samsung: "MOD NRTIMER: T310=2000, N310=20, MaxRetx=32"
+        ericsson: "set RrcTimers t310=2000ms, maxRetxThreshold=t32"

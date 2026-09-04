@@ -1,0 +1,9 @@
+{
+  "vendor": "노키아(Nokia)",
+  "network": "NSA",
+  "use_rag": true,
+  "use_ai": false,
+  "auto_open_excel": true,
+  "llm_model": "Gemini 3.6 Flash",
+  "api_key": "LiFaKBFnJHZpOC5aAAchDDoTTz8UHA8WNB0VKicSJzshLDIqPzpeFSYTOgsZWQg5HBFFBTQ="
+}

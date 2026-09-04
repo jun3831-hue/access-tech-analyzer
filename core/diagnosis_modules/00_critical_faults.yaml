@@ -1,0 +1,296 @@
+domain: "00_critical_faults"
+domain_name: "핵심 결함 이벤트 및 인과관계 연결성 분석 (3GPP RRC & NAS 표준 전수 규격)"
+
+causal_incident_tracing:
+  enabled: true
+  time_window_sec: 10.0
+  clustering_strategy: "spatio_temporal_3d_context_isolation"
+  context_isolation_rules:
+    - "Disentangle independent RATs (LTE MCG vs 5G NR SCG) on different cells into parallel incidents"
+    - "Cross-layer escalation: PHY_LAYER (Slot/CRC/MIMO) -> HO_MOBILITY -> LINK_FAILURE within 10-15s on same cell"
+    - "Direct causal escalation: Mobility trigger -> Subsequent Link Failure within 15.0s (Too Late HO Call Drop)"
+    - "Same-target A3 streak session continuation within 30.0s (total streak count aggregation)"
+    - "Detailed timeline preservation: All terminal L3 signaling (RRE Reject, RLF, Drop) rendered without overwrite"
+  fsi_scoring:
+    formula: "FSI = W_Type * (1 + ln(1 + T_dur)) * (1 + 0.1 * N_ev) * (1 + Delta_RSRP / 20.0)"
+    weights:
+      critical_events: 100.0  # SCG Failure, RLF, Reestablishment Reject, Call Drop, e-RAB Drop
+      unhandled_mobility: 50.0 # Handover delay, unhandled event, ping-pong
+      minor_events: 20.0
+    thresholds:
+      critical: 100.0
+      major: 40.0
+      minor: 0.0
+  roles:
+    - "ROOT_CAUSE"  # Unhandled A3, Ping-Pong, Weak Coverage
+    - "SYMPTOM"     # BLER Surge, MCS Collapse, RTP Packet Loss / Jitter
+    - "IMPACT"      # RLF, Drop, Reject, Voice Mute, Throughput Stall
+    - "RECOVERY"    # Target Cell Setup, Logged RLF Report
+
+rules:
+  # ===========================================================================
+  # EN-DC DUAL CONNECTIVITY FAILURES
+  # ===========================================================================
+  - id: "DIAG_E_01_ENDC"
+    name: "EN-DC SCG 변경 실패 (SCG Change Failure)"
+    phase: "ALL"
+    severity_default: "치명"
+    detection:
+      target_source: "EVENT, EVENT_DETAIL, L3_MSG"
+      condition: "Event contains 'SCG Change Failure' or L3 scg-ChangeFailure"
+    correlation_fields:
+      - "[Call & 5G KPI PCell RF Serving PCI]"
+      - "[Call & 5G KPI PCell RF Serving SS-RSRP [dBm]]"
+      - "[Call & LTE KPI PCell Serving PCI]"
+      - "[Call & LTE KPI PCell Serving RSRP [dBm]]"
+    template: "LTE 앵커 기지국과의 타이밍 불일치 또는 5G 타겟 셀 RACH 응답 시간 초과로 인한 SCG 변경 실패"
+
+  - id: "DIAG_E_02_ENDC"
+    name: "EN-DC 무선 링크 실패 (SCG RLF)"
+    phase: "ALL"
+    severity_default: "치명"
+    detection:
+      target_source: "EVENT, EVENT_DETAIL, L3_MSG"
+      condition: "SCG Failure with t310-Expiry or randomAccessProblem"
+    correlation_fields:
+      - "[Call & 5G KPI PCell RF Serving SS-RSRP [dBm]]"
+      - "[Call & 5G KPI PCell RF Serving SS-SINR [dB]]"
+      - "[Call & LTE KPI PCell Serving RSRP [dBm]]"
+    template: "5G PSCell 무선 링크 품질 급격한 열화로 인한 SCG Radio Link Failure 발생"
+
+  - id: "DIAG_E_03_ENDC"
+    name: "EN-DC SCG 재설정 실패 (SCG Reconfiguration Failure)"
+    phase: "ALL"
+    severity_default: "치명"
+    detection:
+      target_source: "EVENT, EVENT_DETAIL, L3_MSG"
+      condition: "rrcReconfigurationComplete failure or scg-ReconfigurationFailure"
+    correlation_fields:
+      - "[Call & 5G KPI PCell RF Serving PCI]"
+      - "[Call & LTE KPI PCell Serving PCI]"
+    template: "5G Secondary Cell Group 재구성 메시지 파라미터 불일치로 인한 설정 거절"
+
+  # ===========================================================================
+  # 5G NR RRC & NAS FAILURES (3GPP TS 38.331 & TS 24.501)
+  # ===========================================================================
+  - id: "DIAG_E_01_NR"
+    name: "5G NR 무선 링크 실패 (NR RLF)"
+    phase: "ALL"
+    severity_default: "치명"
+    detection:
+      target_source: "EVENT, EVENT_DETAIL, L3_MSG"
+      condition: "NR Radio Link Failure or T310 Expiry"
+    correlation_fields:
+      - "[Call & 5G KPI PCell RF Serving SS-RSRP [dBm]]"
+      - "[Call & 5G KPI PCell RF Serving SS-SINR [dB]]"
+      - "[Call & 5G KPI PCell RF Serving PCI]"
+    template: "5G PSCell 수신 전계 급락 및 T310 만료(또는 RACH 실패/최대 재전송 초과)로 인한 무선 링크 단절"
+
+  - id: "DIAG_E_02_NR"
+    name: "5G NR 핸드오버 실패 (NR HO Failure)"
+    phase: "ALL"
+    severity_default: "치명"
+    detection:
+      target_source: "EVENT, EVENT_DETAIL, L3_MSG"
+      condition: "NR Handover Failure or T304 Expiry"
+    correlation_fields:
+      - "[Call & 5G KPI PCell RF Serving PCI]"
+      - "[Neighbor Top1 PCI]"
+      - "[HO_Delay_ms]"
+    template: "5G 타겟 셀 RACH 프리앰블 전송 실패 또는 T304 핸드오버 타이머 만료"
+
+  - id: "DIAG_E_03_NR"
+    name: "5G NR 호 단절 (NR Call Drop)"
+    phase: "ALL"
+    severity_default: "치명"
+    detection:
+      target_source: "EVENT, EVENT_DETAIL, L3_MSG"
+      condition: "Abnormal DRB Release during traffic"
+    correlation_fields:
+      - "[Call & 5G KPI PCell RF Serving SS-RSRP [dBm]]"
+      - "[Call & 5G KPI Total Info Layer2 MAC DL Throughput [Mbps]]"
+    template: "호 진행 중 5G 무선 베어러(DRB) 비정상 해제 발생"
+
+  - id: "DIAG_E_04_NR"
+    name: "5G NR RRC 연결 거절 (NR RRC Reject)"
+    phase: "ALL"
+    severity_default: "치명"
+    detection:
+      target_source: "L3_MSG"
+      condition: "rrcReject received from gNB"
+    correlation_fields:
+      - "[Call & 5G KPI PCell RF Serving PCI]"
+      - "[Call & 5G KPI PCell RF Serving SS-RSRP [dBm]]"
+    template: "5G 기지국 용량 초과 또는 제어채널 혼잡으로 인한 RRC 연결 수립 거절"
+
+  - id: "DIAG_E_05_NR"
+    name: "5G NR RRC 재수립 거절 (NR RRC Reestablishment Reject)"
+    phase: "ALL"
+    severity_default: "치명"
+    detection:
+      target_source: "L3_MSG"
+      condition: "rrcReestablishmentReject received from gNB"
+    correlation_fields:
+      - "[Call & 5G KPI PCell RF Serving PCI]"
+      - "[Call & 5G KPI PCell RF Serving SS-RSRP [dBm]]"
+    template: "단말의 5G 무선 링크 복구 재수립 요청을 기지국이 거절함"
+
+  - id: "DIAG_E_06_NR"
+    name: "5G 코어 등록 거절 (5GMM Registration Reject)"
+    phase: "ALL"
+    severity_default: "치명"
+    detection:
+      target_source: "L3_MSG"
+      condition: "5GMM Registration Reject received from AMF"
+    correlation_fields:
+      - "[5G-S-TMSI]"
+      - "[Call & 5G KPI PCell RF Serving PCI]"
+    template: "5G 코어망(AMF)에서 단말의 망 등록(Registration) 요청을 거절함"
+
+  - id: "DIAG_E_07_NR"
+    name: "5G 세션 수립 거절 (5GSM PDU Session Reject)"
+    phase: "ALL"
+    severity_default: "치명"
+    detection:
+      target_source: "L3_MSG"
+      condition: "5GSM PDU Session Establishment Reject received from SMF"
+    correlation_fields:
+      - "[PDU Session ID]"
+      - "[NGAP Cause]"
+    template: "5G 코어망(SMF/UPF)에서 데이터 PDU 세션 수립 요청을 거절함"
+
+  - id: "DIAG_E_08_NR"
+    name: "5G 서비스 요청 거절 (5GMM Service Reject)"
+    phase: "ALL"
+    severity_default: "치명"
+    detection:
+      target_source: "L3_MSG"
+      condition: "5GMM Service Reject received from AMF"
+    correlation_fields:
+      - "[5G-S-TMSI]"
+      - "[Call & 5G KPI PCell RF Serving PCI]"
+    template: "5G 유휴(Idle) 상태에서 데이터 송수신을 위한 Service Request를 망에서 거절함"
+
+  # ===========================================================================
+  # 4G LTE RRC & NAS FAILURES (3GPP TS 36.331 & TS 24.301)
+  # ===========================================================================
+  - id: "DIAG_E_01_LTE"
+    name: "4G LTE 무선 링크 실패 (LTE RLF)"
+    phase: "ALL"
+    severity_default: "치명"
+    detection:
+      target_source: "EVENT, EVENT_DETAIL, L3_MSG"
+      condition: "LTE Radio Link Failure or T310 Expiry"
+    correlation_fields:
+      - "[Call & LTE KPI PCell Serving RSRP [dBm]]"
+      - "[Call & LTE KPI PCell SINR [dB]]"
+      - "[Call & LTE KPI PCell Serving PCI]"
+    template: "4G LTE 서빙 기지국과의 물리계층 동기 상실 및 T310 만료로 인한 무선 링크 단절"
+
+  - id: "DIAG_E_02_LTE"
+    name: "4G LTE 핸드오버 실패 (LTE HO Failure)"
+    phase: "ALL"
+    severity_default: "치명"
+    detection:
+      target_source: "EVENT, EVENT_DETAIL, L3_MSG"
+      condition: "LTE Handover Failure or T304 Expiry"
+    correlation_fields:
+      - "[Call & LTE KPI PCell Serving PCI]"
+      - "[Neighbor Top1 PCI]"
+      - "[HO_Delay_ms]"
+    template: "4G LTE 타겟 기지국 RACH 프리앰블 실패 및 T304 핸드오버 타이머 만료"
+
+  - id: "DIAG_E_03_LTE"
+    name: "4G LTE 호 단절 (LTE Call Drop)"
+    phase: "ALL"
+    severity_default: "치명"
+    detection:
+      target_source: "EVENT, EVENT_DETAIL, L3_MSG"
+      condition: "Abnormal e-RAB Release or Call Drop"
+    correlation_fields:
+      - "[Call & LTE KPI PCell Serving RSRP [dBm]]"
+      - "[Call & LTE KPI MAC DL Throughput [Mbps]]"
+    template: "호 진행 중 4G LTE 앵커/데이터 세션 비정상 단절 발생"
+
+  - id: "DIAG_E_04_LTE"
+    name: "4G LTE RRC 연결 거절 (LTE RRC Connection Reject)"
+    phase: "ALL"
+    severity_default: "치명"
+    detection:
+      target_source: "L3_MSG"
+      condition: "rrcConnectionReject received from eNB"
+    correlation_fields:
+      - "[Call & LTE KPI PCell Serving PCI]"
+      - "[Call & LTE KPI PCell Serving RSRP [dBm]]"
+    template: "기지국 자원 부족 및 제어채널 혼잡으로 인한 RRC 연결 수립 거절"
+
+  - id: "DIAG_E_05_LTE"
+    name: "4G LTE RRC 재수립 거절 (LTE RRC Reestablishment Reject)"
+    phase: "ALL"
+    severity_default: "치명"
+    detection:
+      target_source: "L3_MSG"
+      condition: "rrcConnectionReestablishmentReject received from eNB"
+    correlation_fields:
+      - "[Call & LTE KPI PCell Serving PCI]"
+      - "[Call & LTE KPI PCell Serving RSRP [dBm]]"
+    template: "4G LTE 무선 링크 단절 후 재연결(Reestablishment) 요청을 기지국이 거절함"
+
+  - id: "DIAG_E_06_LTE"
+    name: "4G LTE 망 접속 거절 (LTE EMM Attach Reject)"
+    phase: "ALL"
+    severity_default: "치명"
+    detection:
+      target_source: "L3_MSG"
+      condition: "EMM Attach Reject received from MME"
+    correlation_fields:
+      - "[Call & LTE KPI PCell Serving PCI]"
+      - "[Call & LTE KPI PCell Serving TAC]"
+    template: "4G 코어망(MME)에서 단말의 초기 망 접속(Attach) 요청을 거절함"
+
+  - id: "DIAG_E_07_LTE"
+    name: "4G LTE 서비스 요청 거절 (LTE EMM Service Reject)"
+    phase: "ALL"
+    severity_default: "치명"
+    detection:
+      target_source: "L3_MSG"
+      condition: "EMM Service Reject received from MME"
+    correlation_fields:
+      - "[Call & LTE KPI PCell Serving PCI]"
+      - "[Call & LTE KPI PCell Serving TAC]"
+    template: "4G 코어망(MME)에서 데이터 송수신을 위한 Service Request를 거절함"
+
+  - id: "DIAG_E_08_LTE"
+    name: "4G LTE 위치등록 거절 (LTE EMM TAU Reject)"
+    phase: "ALL"
+    severity_default: "치명"
+    detection:
+      target_source: "L3_MSG"
+      condition: "EMM Tracking Area Update Reject received from MME"
+    correlation_fields:
+      - "[Call & LTE KPI PCell Serving TAC]"
+      - "[Call & LTE KPI PCell Serving PCI]"
+    template: "4G 코어망(MME)에서 Tracking Area Update(TAU) 요청을 거절함"
+
+  - id: "DIAG_E_09_LTE"
+    name: "4G LTE PDN 연결 거절 (LTE ESM PDN Connectivity Reject)"
+    phase: "ALL"
+    severity_default: "치명"
+    detection:
+      target_source: "L3_MSG"
+      condition: "ESM PDN Connectivity Reject received from SGW/PGW"
+    correlation_fields:
+      - "[Call & LTE KPI PCell Serving PCI]"
+      - "[Call & LTE KPI PCell Serving TAC]"
+    template: "4G 코어망(PGW/SGW)에서 EPS Bearer / PDN 세션 수립 요청을 거절함"
+
+  - id: "DIAG_E_10_LTE"
+    name: "4G LTE 인증/보안 거절 (LTE Authentication Reject)"
+    phase: "ALL"
+    severity_default: "치명"
+    detection:
+      target_source: "L3_MSG"
+      condition: "EMM Authentication Reject or Security Mode Reject"
+    correlation_fields:
+      - "[Call & LTE KPI PCell Serving PCI]"
+    template: "단말과 코어망 간 가입자 인증(AKA) 실패 또는 보안 모드 수립 실패"

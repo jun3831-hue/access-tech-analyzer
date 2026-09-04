@@ -1,0 +1,263 @@
+nokia_domain_modules:
+  nokia_cell_specific_csirs_module:
+    name: 노키아 Cell Specific CSI-RS (일반 단말) 할당 및 Zero Power / Other Pool RS4 Muting
+      룰
+    intent: 일반 단말 대상 Cell Specific CSI-RS 계위(RS4/2/1)를 판별하고, Explicit Zero Power(TRS,
+      Own Pool CSI-IM/CSI-RS)와 Implicit Muting(Other Pool RS4)을 구별하여 통합 관리
+    theory: RRC 메시지에 나오는 TRS, Own Pool CSI-IM, Own Pool CSI-RS는 'ZERO POWER'로 구분하며,
+      RRC 메시지에 직접 표기되지 않고 도메인 룰 오프셋으로 추정하는 Other Pool의 RS4 CSI-RS 위치는 'MUTING'으로 명확히
+      구분함
+    target_dataframe: NR_DL_RS_Table
+    hierarchy_classification:
+      RS4:
+        condition: ResourceCount == 4 and nrofPorts == 'p8'
+        ports: 32
+        description: 32포트 메인 풀 (8포트 x 4개 리소스 묶음)
+      RS2:
+        condition: ResourceCount == 2 and nrofPorts == 'p8'
+        ports: 16
+        description: 16포트 풀 (8포트 x 2개 리소스 묶음)
+      RS1:
+        condition: ResourceCount == 1 and nrofPorts == 'p8'
+        ports: 8
+        description: 8포트 풀 (8포트 x 1개 리소스 단독)
+    csirs_pool_offsets:
+      Pool0:
+        RS4: 25
+        RS2: 65
+        RS1: 105
+      Pool1:
+        RS4: 66
+        RS2: 106
+        RS1: 26
+      Pool2:
+        RS4: 107
+        RS2: 27
+        RS1: 67
+    csi_im_pool_offsets:
+      Pool0:
+        RS4: 22
+        RS2: 65
+        RS1: 105
+      Pool1:
+        RS4: 62
+        RS2: 106
+        RS1: 26
+      Pool2:
+        RS4: 102
+        RS2: 27
+        RS1: 67
+    zero_power_allocation:
+      own_pool_csi_im_zp:
+        rule: RS_Category == 'ZP_CSI_RS' and is_own_pool_csi_im_offset(Slot_Offset)
+        description: Own Pool CSI-IM 위치 명시적 Zero Power 설정
+      own_pool_csi_rs_zp:
+        rule: RS_Category == 'NZP_CSI_RS' and is_own_pool_csirs_offset(Slot_Offset)
+        description: Own Pool CSI-RS 위치 명시적 Zero Power 설정
+      zp_trs:
+        rule: RS_Category == 'ZP_TRS' and nrofPorts == 'p12'
+        description: TRS 발사 OFDM 심볼 영역 전체 12포트 Zero Power 설정
+    muting_allocation:
+      other_pool_rs4_muting:
+        rule: Slot_Offset in get_other_pool_rs4_offsets(Current_Pool)
+        description: Other Pool의 RS4 CSI-RS 위치에 대해서만 PDSCH Muting 적용 (Cell Specific
+          & UE Specific 공통)
+    csi_im_allocation:
+      rule: RS_Category == 'CSI_IM' and associated_csirs_type == 'Cell_Specific'
+      description: Cell-Specific Own Pool Zero Power 영역 순수 간섭 전력(I+N) 측정
+  nokia_ue_specific_csirs_module:
+    name: 노키아 UE Specific CSI-RS (VIP 단말) 할당 및 Zero Power / Other Pool RS4 Muting
+      룰
+    intent: 특정 SPID 지정 VIP 단말 대상 UE Specific 4포트 CSI-RS 할당 동작과 이에 대응하는 Zero Power
+      및 Other Pool RS4 Muting 룰 규정
+    theory: VIP 단말은 Subband BF 진입 시 독립적인 UE Specific 4포트 CSI-RS(nrofPorts == 'p4')를
+      할당받음. UE Specific CSI-RS 할당 시에도 Cell Own Pool CSI-IM/CSI-RS Zero Power와 Other
+      Pool RS4 Muting은 동일하게 유지됨
+    target_dataframe:
+    - NR_DL_RS_Table
+    - NR_UL_RS_Table
+    definition:
+      condition: nrofPorts == 'p4'
+      tag: VIP_UE_Specific_CSI_RS
+      description: VIP 단말 전용 4포트 UE Specific CSI-RS
+    zero_power_allocation:
+      own_pool_csi_im_zp:
+        rule: RS_Category == 'ZP_CSI_RS' and is_own_pool_csi_im_offset(Slot_Offset)
+        description: UE-Specific 할당 중에도 Cell Own Pool CSI-IM 위치 Zero Power 유지
+      ue_specific_csi_rs_zp:
+        rule: RS_Category == 'ZP_CSI_RS' and associated_csirs_type == 'UE_Specific'
+        description: UE-Specific CSI-RS 위치 명시적 Zero Power 설정
+    muting_allocation:
+      other_pool_rs4_muting:
+        rule: Slot_Offset in get_other_pool_rs4_offsets(Current_Pool)
+        description: UE-Specific 할당 중에도 Other Pool의 RS4 CSI-RS 위치 PDSCH Muting 유효
+    csi_im_allocation:
+      rule: RS_Category == 'CSI_IM' and associated_csirs_type == 'UE_Specific'
+      description: UE-Specific CSI-RS Zero Power 영역 대응 순수 간섭 전력(I+N) 측정
+  nokia_trs_ssb_association:
+    name: 노키아 TRS 및 SSB 1:1 QCL TypeC 동기 추적 룰
+    intent: SSB 빔과 TRS 리소스 세트 간의 1:1 QCL 매핑 관계 검증
+    theory: SSB 빔 1개당 지정된 수의 TRS 리소스가 매핑되며, QCL TypeC로 1:1 연동됨
+    target_dataframe: NR_DL_RS_Table
+    rules:
+      rule: RS_Category == 'TRS' and QCL_Info_TCI is not null
+      description: TRS 리소스 세트와 SSB 빔 간의 1:1 QCL 연동
+  nokia_vip_feature_architecture:
+    name: 노키아 VIP 단말 2대 기능 및 종속 관계 정의
+    intent: Wideband SRS 및 UE-Specific CSI-RS 할당 구조에 대한 시스템 배경지식 정의
+    theory: 'VIP 단말을 위해 동작하는 핵심 기능은 2가지(Wideband SRS 및 UE-Specific CSI-RS)이다. 1. Wideband
+      SRS(b_SRS=0): MMSE 기반 Subband Beamforming(BF) 지원의 기본 전제 신호 (100MHz 272 RBs 풀
+      대역폭). 2. Subband SRS(b_SRS!=0, 즉 b_SRS=1,2,3): 일반 단말 대상 서브밴드 홉핑 신호 (68 RBs partial
+      대역폭). 3. UE-Specific CSI-RS(nrofPorts==''p4''): 단말 전용 CSI-RS 자원 할당. [종속성 원칙]
+      UE-Specific CSI-RS 할당은 반드시 Wideband SRS(b_SRS=0)가 선행 할당되어야만 동작 가능한 시스템 구조 종속성을
+      가진다.
+
+      '
+    target_dataframe:
+    - NR_UL_RS_Table
+    - NR_DL_RS_Table
+  nokia_ho_state_preservation_theory:
+    name: 핸드오버(HO) 시 VIP 상태 보존 법칙
+    intent: 셀 간 이동 시 SRS 및 CSI-RS 할당 조합의 상태 연속성 동작 정의
+    theory: '한번 설정된 VIP 서비스 조합은 정상 장비 간 HO 발생 시 동일하게 인계(Preserved)된다. - Wideband SRS
+      + Cell-Specific CSI-RS -> (HO) -> Wideband SRS + Cell-Specific CSI-RS - Wideband
+      SRS + UE-Specific CSI-RS -> (HO) -> Wideband SRS + UE-Specific CSI-RS
+
+      '
+    target_dataframe:
+    - NR_Mobility_Meas_Table
+    - NR_UL_RS_Table
+    - NR_DL_RS_Table
+  nokia_equipment_specifications:
+    name: 노키아 기지국 장비 모델별 Subband BF / Wideband SRS 지원 사양 DB
+    intent: Target PCI + 위경도 데이터를 통한 장비 모델 식별 시 Subband BF 지원 여부 판별용 레퍼런스 DB
+    note: 현재 단말 로그 단독 분석 시에는 미사용하며, 향후 PCI+위경도 장비 DB 연동 시 결합 참조
+    target_dataframe:
+    - Cell_Equipment_DB
+    - NR_Mobility_Meas_Table
+    - NR_UL_RS_Table
+    - NR_DL_RS_Table
+    supported_equipment:
+      aau_models:
+      - model: AEQY
+        ports: 32T32R
+        supports_subband_bf: true
+      - model: AQQL
+        ports: 64T64R
+        supports_subband_bf: true
+      - model: AVQL
+        ports: 64T64R
+        supports_subband_bf: true
+      - model: AVQQ
+        ports: 32T32R
+        supports_subband_bf: true
+    unsupported_equipment:
+      aau_models:
+      - model: AEQN
+        ports: 32T32R
+        supports_subband_bf: false
+      pru_models:
+      - model: AZQL
+        ports: 8T8R
+        supports_subband_bf: false
+      - model: AZQI
+        ports: 8T8R
+        supports_subband_bf: false
+      lsh_models:
+      - model: AZQH
+        ports: 8T8R
+        supports_subband_bf: false
+  nokia_td_icic_dl_interference_avoidance_module:
+    name: 노키아 버퍼 기반 시간/주파수 영역 간섭 제어 (TD-ICIC & DL Interference Avoidance) 룰
+    intent: Low-Buffer 일반 단말의 TD-ICIC 슬롯 자원 구획 정책과 High-Buffer VIP 단말의 전 슬롯 할당 및 대역
+      최상단 PRB 노치 침범 금지 정책 규정
+    theory: 'Low-Buffer 일반 단말은 셀 간 시간 영역 간섭 회피를 위해 지정된 슬롯 오프셋 패턴(예: Slot % 20 in [0,
+      10, 11, 16] 등)에서만 제약 스케줄링됨. 반면 High-Buffer VIP 단말은 시간 영역 제한 없이 모든 슬롯(All Slots
+      0~19)에 스케줄링이 허용되나, 주파수 영역에서 일반 단말 보호용 대역 최상단 PRB 노치(예: PRB 263~272 노치 구역 등)
+      영역 진입이 엄격히 금지됨.
+
+      '
+    target_dataframe:
+    - Full_MAC_PHY_320_Slot_Table
+    definition:
+      low_buffer_non_vip:
+        time_domain_policy: TD_ICIC_Restricted_Slots
+        allowed_slots_mod20:
+        - 0
+        - 10
+        - 11
+        - 16
+        freq_domain_policy: All_PRBs_Allowed
+      high_buffer_vip:
+        time_domain_policy: All_Slots_Allowed
+        freq_domain_policy: Forbidden_PRB_Notch
+        reserved_prb_notch:
+          start_prb: 263
+          num_prbs: 10
+  nokia_sib_ssb_dynamic_allocation_module:
+    name: 노키아 SSB 빔 수량 동적 판별 및 SIB1~SIB19 방송 슬롯 공존 룰
+    intent: RRC 로그에서 SSB 비트마스크를 감지하여 1/2/4/8 SSB 빔 세트를 동적으로 추정하고, SIB1(Type0 CSS)
+      및 SA SIB2~19(Type0A CSS) 방송 슬롯의 SLIV 53 폴백 정상/에러 판정 적용
+    theory: '1. 로그의 ssb-PositionsInBurst 비트마스크를 파싱하여 실제 발사된 Active SSB 빔 개수(N_SSB)를
+      동적 자동 도출함.
+
+      2. N_SSB 수량 및 노키아 SIB1 분리 오프셋 지침(Slot 10~12)에 따라 SIB1 전송 슬롯과 UL Grant 발사 슬롯(n
+      = U - k2)의 오버랩 여부를 연산함.
+
+      3. SIB1 + UL Grant 오버랩 슬롯에서의 SLIV 53(S=2, L=12) 할당은 정상 공존 동작으로 통과 예외 처리하고, 비-오버랩
+      일반 슬롯에서의 SLIV 53만 DET_COM_10 에러로 포착함.
+
+      '
+    target_dataframe: 3_DL_RS_Table_Synthesized & mac_phy_sync
+    ssb_beam_allocation_mapping:
+      1SSB:
+        condition: N_SSB == 1
+        slot_pattern_formula: SFN % 2 == 0 and Slot % 20 in [0]
+        description: 1개 SSB 빔 발사 시 Slot 0번 단독 SIB1 방송
+      2SSB:
+        condition: N_SSB == 2
+        slot_pattern_formula: SFN % 2 == 0 and Slot % 20 in [0, 1]
+        description: 2개 SSB 빔 발사 시 Slot 0, 1번 SIB1 방송
+      4SSB:
+        condition: N_SSB == 4
+        slot_pattern_formula: SFN % 2 == 0 and Slot % 20 in [0, 1, 2, 3]
+        description: 4개 SSB 빔 발사 시 Slot 0~3번 SIB1 방송
+      8SSB:
+        condition: N_SSB == 8
+        slot_pattern_formula: SFN % 2 == 0 and Slot % 20 in [0, 1, 2, 3, 4, 5, 6,
+          7]
+        description: 8개 SSB 빔 발사 시 Slot 0~7번 SIB1 방송
+    nokia_separated_sib1_offset:
+      ssb_trans_slots:
+      - 0
+      - 1
+      - 2
+      sib1_trans_slots:
+      - 10
+      - 11
+      - 12
+      description: 노키아 AirScale gNB는 SSB 전송 구역(Slot 0~2)과 SIB1 전송 구역(Slot 10~12)을
+        분리(Separated Offset) 전송함
+    system_information_containers:
+      SIB1:
+        search_space_type: Type0-PDCCH CSS (searchSpaceZero)
+        rnti_type: SI-RNTI
+        coexistence_rule: SIB1 슬롯(Slot 10~12) 내 C-RNTI UL Grant(n = U - k2) 동시 전송
+          시 PDCCH 2심볼 TDM 확장(SLIV 53, S=2, L=12) 정상 예외 처리
+      SIB2_19_Extensible:
+        search_space_type: Type0A-PDCCH CSS (searchSpaceSIB1)
+        rnti_type: SI-RNTI
+        si_periodicity_tracker: schedulingInfoList.si-Periodicity
+        coexistence_rule: SA 향후 확장용 SIB2~19 전송 윈도우 내 SLIV 53 폴백 정상 예외 처리 확장 가능
+    evaluation_matrix:
+      normal_coexistence:
+        condition: is_sib_ul_grant_overlap_slot(N_SSB, k2_min, Current_Slot) == true
+          and sliv == 53
+        classification: NORMAL_SIB1_UL_GRANT_COEXISTENCE
+        description: SIB1 방송 슬롯과 UL Grant 발사 슬롯 오버랩 시 PDCCH 2심볼 TDM 확장에 따른 정상 SLIV
+          53 동작
+      abnormal_scheduler_error:
+        condition: is_sib_ul_grant_overlap_slot(N_SSB, k2_min, Current_Slot) == false
+          and sliv == 53
+        classification: DET_COM_10_SCHEDULER_ERROR
+        description: 오버랩되지 않는 일반 슬롯에서의 불필요한 PDCCH 2심볼 확장 및 PDSCH SLIV 53 강등 스케줄링 결함

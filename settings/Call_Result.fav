@@ -1,0 +1,6 @@
+[Count]
+Cnt=1
+[Index 0]
+Caption=Call_Result
+Filter String=Voice Call;;CMREVENTVOICE;;Voice Call;;_;;0;;813010000|Voice Call Service;;CMREVENTVICSER;;Voice Call Service;;_;;0;;813015000|FTP Call;;CMREVENTFTP;;FTP Call;;_;;0;;813020000|Browser Call;;CMREVENTBROWSER;;Browser Call;;_;;0;;813030000|HTTP Call;;CMREVENTHTTP;;HTTP Call;;_;;0;;813040000|CS Call;;CMREVENTCS;;CS Call;;_;;0;;813050000|E-Mail Call;;CMREVENTEMAIL;;E-Mail Call;;_;;0;;813060000|UDP Call;;CMREVENTUDP;;UDP Call;;_;;0;;813070000|Iperf Call;;CMREVENTIPERF;;Iperf Call;;_;;0;;813090000|Ping Call;;CMREVENTPING;;Ping Call;;_;;0;;813100000|WiFi Connect Call;;CMREVENTWIFI;;WiFi Connect Call;;_;;0;;813110000|YouTube Call;;CMREVENTYOUTUBE;;YouTube Call;;_;;0;;813120000|SMS Android Call;;CMREVENTSMSCALL;;SMS Android Call;;_;;0;;813122500|Messenger Texting Call;;CMREVENTMSGTEXT;;Messenger Texting Call;;_;;0;;813126000|Messenger Talk Call;;CMREVENTMSGTCALL;;Messenger Talk Call;;_;;0;;813127000|Online Meeting Call;;CMREVENTMSGMEET;;Online Meeting Call;;_;;0;;813126500|Video Streaming Call;;CMREVENTVIDEOSTC;;Video Streaming Call;;_;;0;;813128000|Speed Test call;;CMREVENTSPDTEST;;Speed Test call;;_;;0;;813155000
+Filter Type=3

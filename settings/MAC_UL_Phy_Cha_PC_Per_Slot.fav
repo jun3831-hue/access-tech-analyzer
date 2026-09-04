@@ -1,0 +1,6 @@
+[Count]
+Cnt=1
+[Index 0]
+Caption=MAC_UL_Phy_Cha_PC_Per_Slot
+Filter String=System Frame Number;;5GNRMUPCPCCFM_0;;Table>Qualcomm 5G-NR>MAC UL Physical Channel Power Control[Per Slot]>PCell>System Frame Number;;;;;;3322444|Slot Number;;5GNRMUPCPCCSN_0;;Table>Qualcomm 5G-NR>MAC UL Physical Channel Power Control[Per Slot]>PCell>Slot Number;;;;;;3322445|PUSCH Actual Transmit Power;;5GNRMUPCPCCDTR_0;;Table>Qualcomm 5G-NR>MAC UL Physical Channel Power Control[Per Slot]>PCell>PUSCH Data>PUSCH Actual Transmit Power;;;;;;3322458|MTPL;;5GNRMUPCPCCDMTPL_0;;Table>Qualcomm 5G-NR>MAC UL Physical Channel Power Control[Per Slot]>PCell>PUSCH Data>MTPL;;;;;;3322460|DL Pathloss;;5GNRMUPCPCCDPTH_0;;Table>Qualcomm 5G-NR>MAC UL Physical Channel Power Control[Per Slot]>PCell>PUSCH Data>DL Pathloss;;;;;;3322459|M SRS;;5GNRMUPCPCCSSR_0;;Table>Qualcomm 5G-NR>MAC UL Physical Channel Power Control[Per Slot]>PCell>SRS Data>M SRS;;;;;;3322477|SRS Actual Transmit Power;;5GNRMUPCPCCSTRP_0;;Table>Qualcomm 5G-NR>MAC UL Physical Channel Power Control[Per Slot]>PCell>SRS Data>SRS Actual Transmit Power;;;;;;3322478|MTPL;;5GNRMUPCPCCSMPL_0;;Table>Qualcomm 5G-NR>MAC UL Physical Channel Power Control[Per Slot]>PCell>SRS Data>MTPL;;;;;;3322481|DL Pathloss;;5GNRMUPCPCCSDPA_0;;Table>Qualcomm 5G-NR>MAC UL Physical Channel Power Control[Per Slot]>PCell>SRS Data>DL Pathloss;;;;;;3322480
+Filter Type=3

@@ -1,0 +1,11 @@
+{
+  "file_pre": "C:/Users/SKTelecom/Desktop/LOG/260623 상무지구 Ref/0623 상무지구 오후 DL#1-M1-R1-S1-C1-T1-Comp_End by user.drm",
+  "file_post": "",
+  "api_key": "LiFaKBFnJHdpOC5aAAchDDoTTz8UHA8WNB0UKicSJzshLDIqPzpeFSYTOgsZWAg5HBFFBTQ=",
+  "vendor": "노키아(Nokia)",
+  "network": "NSA",
+  "mode": "[전체] 스케줄러 & 자원 충돌 종합 진단 (고도화)",
+  "llm_model": "Gemini 3.6 Flash",
+  "use_ai": true,
+  "auto_open_excel": true
+}

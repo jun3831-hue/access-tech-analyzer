@@ -312,39 +312,46 @@ def show_remote_folder_dialog(ftp_host, ftp_port, ftp_user, ftp_pass):
         cur_nav = '/' + cur_nav
     cur_nav = posixpath.normpath(cur_nav)
 
-    st.markdown(f"""
-    <div style="background-color: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 8px 12px; margin-bottom: 10px;">
-        <span style="font-size: 11px; color: #94a3b8; font-weight: 600;">현재 탐색 경로:</span><br/>
-        <span style="font-size: 13px; color: #38bdf8; font-family: monospace; font-weight: 700; word-break: break-all;">{cur_nav}</span>
-    </div>
-    """, unsafe_allow_html=True)
+    # 1. Breadcrumbs Navigation
+    st.markdown("##### 📍 현재 탐색 경로")
+    parts = [p for p in cur_nav.strip('/').split('/') if p]
+    b_cols = st.columns(len(parts) + 1)
+    with b_cols[0]:
+        if st.button("🏠 /", key="bc_web_root", use_container_width=True, help="최상위 루트(/)로 이동"):
+            st.session_state['browse_nav_dir'] = '/'
+            st.rerun()
 
-    col_nav1, col_nav2, col_nav3 = st.columns([0.34, 0.33, 0.33])
-    with col_nav1:
+    accum_path = ""
+    for idx, p in enumerate(parts):
+        accum_path += "/" + p
+        with b_cols[idx + 1]:
+            is_current = (idx == len(parts) - 1)
+            btn_label = f"📁 {p}" if is_current else p
+            if st.button(btn_label, key=f"bc_web_{idx}_{p}", disabled=is_current, use_container_width=True):
+                st.session_state['browse_nav_dir'] = accum_path
+                st.rerun()
+
+    # 2. Controls bar: Up, Refresh
+    col_up, col_ref = st.columns([0.5, 0.5])
+    with col_up:
         parent_dir = posixpath.dirname(cur_nav.rstrip('/'))
         if not parent_dir:
             parent_dir = '/'
         is_root = (cur_nav.strip().rstrip('/') in ['', '/'])
-        if st.button("⬆️ 상위 폴더", disabled=is_root, use_container_width=True, key="dlg_btn_up"):
+        if st.button("⬆️ 상위 폴더로 이동", disabled=is_root, use_container_width=True, key="dlg_web_btn_up"):
             st.session_state['browse_nav_dir'] = parent_dir
             st.rerun()
-
-    with col_nav2:
-        if st.button("🏠 기본 (raw_zips)", use_container_width=True, key="dlg_btn_home"):
-            st.session_state['browse_nav_dir'] = DEFAULT_RAW_ZIPS_DIR
-            st.rerun()
-
-    with col_nav3:
-        if st.button("🔄 새로고침", use_container_width=True, key="dlg_btn_refresh"):
+    with col_ref:
+        if st.button("🔄 새로고침", use_container_width=True, key="dlg_web_btn_refresh"):
             browse_remote_directory.clear()
             st.rerun()
 
-    with st.spinner("원격 디렉토리 조회 중..."):
+    with st.spinner("원격 디렉토리 스캔 중..."):
         scan_res = browse_remote_directory(ftp_host, ftp_port, ftp_user, ftp_pass, cur_nav)
 
     if scan_res.get("error"):
         st.error(f"❌ 경로 조회 오류: {scan_res['error']}")
-        if st.button("닫기", use_container_width=True, key="dlg_btn_close_err"):
+        if st.button("닫기", use_container_width=True, key="dlg_web_btn_close_err"):
             st.session_state['show_explorer_dialog'] = False
             st.rerun()
         return
@@ -353,47 +360,47 @@ def show_remote_folder_dialog(ftp_host, ftp_port, ftp_user, ftp_pass):
     files = scan_res.get("files", [])
     zip_count = sum(1 for f in files if f.get('is_zip'))
 
-    if subdirs:
-        col_sel, col_go = st.columns([0.76, 0.24])
-        with col_sel:
-            target_sub = st.selectbox(
-                "📁 하위 폴더 목록:",
-                options=["(진입할 하위 폴더를 선택하세요)"] + subdirs,
-                key="dlg_sub_picker",
-                label_visibility="collapsed"
-            )
-        with col_go:
-            if st.button("진입 ➔", use_container_width=True, key="dlg_btn_enter_sub"):
-                if target_sub and target_sub != "(진입할 하위 폴더를 선택하세요)":
-                    st.session_state['browse_nav_dir'] = posixpath.join(cur_nav, target_sub)
-                    st.rerun()
-
+    # 3. Subdirectories: One-Click buttons in a clean responsive grid
     st.markdown("---")
-    st.markdown(f"##### 📋 폴더 내용물 전수 ({len(subdirs)}개 폴더, {len(files)}개 파일 | ZIP: {zip_count}개)")
+    if subdirs:
+        st.markdown(f"##### 📁 하위 폴더 ({len(subdirs)}개) - 클릭 시 즉시 진입")
+        cols_per_row = 3
+        for i in range(0, len(subdirs), cols_per_row):
+            row_subs = subdirs[i:i + cols_per_row]
+            r_cols = st.columns(cols_per_row)
+            for j, sub_name in enumerate(row_subs):
+                with r_cols[j]:
+                    if st.button(f"📁 {sub_name}", key=f"sub_web_btn_{i+j}_{sub_name}", use_container_width=True):
+                        st.session_state['browse_nav_dir'] = posixpath.join(cur_nav, sub_name)
+                        st.rerun()
+    else:
+        st.caption("ℹ️ 현재 폴더에 하위 폴더가 없습니다.")
 
-    item_rows = []
-    for d in subdirs:
-        item_rows.append({"구분": "📁 폴더", "항목명": d, "크기": "-", "분석대상": "하위경로"})
-    for f in files:
-        kind = "📦 압축(ZIP)" if f['is_zip'] else "📄 일반파일"
-        target_str = "✅ 분석 대상" if f['is_zip'] else "원시/참조"
-        item_rows.append({"구분": kind, "항목명": f['name'], "크기": f['size'], "분석대상": target_str})
+    # 4. Files List (All extensions with icons & sizes)
+    st.markdown("---")
+    st.markdown(f"##### 📄 현재 폴더 내 파일 목록 ({len(files)}개 | ZIP: {zip_count}개)")
 
-    if item_rows:
+    if files:
+        item_rows = []
+        for f in files:
+            kind = "📦 압축(ZIP)" if f['is_zip'] else "📄 일반파일"
+            target_str = "✅ 분석 대상" if f['is_zip'] else "원시/참조"
+            item_rows.append({"구분": kind, "파일명": f['name'], "크기": f['size'], "분석대상": target_str})
+
         df_items = pd.DataFrame(item_rows)
         st.dataframe(
             df_items,
             use_container_width=True,
-            height=min(280, 36 + len(item_rows) * 35),
+            height=min(260, 36 + len(item_rows) * 35),
             hide_index=True
         )
     else:
-        st.info("ℹ️ 폴더가 비어 있습니다.")
+        st.info("ℹ️ 현재 폴더에 파일이 없습니다.")
 
     st.markdown("---")
     col_confirm, col_close = st.columns([0.72, 0.28])
     with col_confirm:
-        if st.button("✅ 이 폴더를 작업 경로로 선택", type="primary", use_container_width=True, key="dlg_btn_confirm_dir"):
+        if st.button("✅ 이 폴더를 작업 경로로 선택", type="primary", use_container_width=True, key="dlg_web_btn_confirm_dir"):
             st.session_state['active_remote_dir'] = cur_nav
             zip_names = [f['name'] for f in files if f.get('is_zip')]
             st.session_state['ftp_zip_list'] = zip_names
@@ -401,7 +408,7 @@ def show_remote_folder_dialog(ftp_host, ftp_port, ftp_user, ftp_pass):
             st.session_state['show_explorer_dialog'] = False
             st.rerun()
     with col_close:
-        if st.button("닫기", use_container_width=True, key="dlg_btn_close_dlg"):
+        if st.button("닫기", use_container_width=True, key="dlg_web_btn_close_dlg"):
             st.session_state['show_explorer_dialog'] = False
             st.rerun()
 
@@ -953,42 +960,22 @@ with st.sidebar:
                 st.session_state['ftp_zip_list'] = zips
                 st.session_state['ftp_zip_list_dir'] = active_dir
                 if zips:
-                    try:
-                        p_val = int(str(ftp_port).strip())
-                    except Exception:
-                        p_val = 10022
-                    save_config({'host': ftp_host, 'port': p_val, 'user': ftp_user, 'password': ftp_pass, 'remote_dir': DEFAULT_RAW_ZIPS_DIR})
                     st.success(f"{len(zips)}개 파일 로드 완료!")
 
-    st.markdown("---")
-    st.markdown("##### 📂 분석 대상 ZIP 선택")
+        st.markdown("---")
+        st.markdown("##### 📁 원격 작업 경로")
+        st.caption(f"현재: `{active_dir}`")
 
-    # Clean Active Directory Box
-    st.markdown(f"""
-    <div style="background-color: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 6px 10px; margin-bottom: 6px;">
-        <div style="font-size: 11px; color: #94a3b8; font-weight: 500;">현재 원격 경로:</div>
-        <div style="font-size: 12px; color: #38bdf8; font-family: monospace; font-weight: 600; word-break: break-all;">{active_dir}</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    col_exp, col_res = st.columns([0.72, 0.28])
-    with col_exp:
-        if st.button("🔍 원격 폴더 탐색기", use_container_width=True, key="btn_web_open_folder_dlg"):
+        if st.button("🔍 원격 폴더 탐색 및 변경", use_container_width=True, key="btn_web_open_folder_dlg"):
             st.session_state['browse_nav_dir'] = active_dir
             st.session_state['show_explorer_dialog'] = True
-            st.rerun()
-    with col_res:
-        if st.button("🏠 기본", help="기본 raw_zips 경로로 복귀", use_container_width=True, key="btn_web_reset_raw_zips"):
-            st.session_state['active_remote_dir'] = DEFAULT_RAW_ZIPS_DIR
-            st.session_state['browse_nav_dir'] = DEFAULT_RAW_ZIPS_DIR
-            with st.spinner("raw_zips 파일 로드 중..."):
-                zips = list_remote_zip_files(ftp_host, ftp_port, ftp_user, ftp_pass, DEFAULT_RAW_ZIPS_DIR)
-                st.session_state['ftp_zip_list'] = zips
-                st.session_state['ftp_zip_list_dir'] = DEFAULT_RAW_ZIPS_DIR
             st.rerun()
 
     if st.session_state.get('show_explorer_dialog', False):
         show_remote_folder_dialog(ftp_host, ftp_port, ftp_user, ftp_pass)
+
+    st.markdown("---")
+    st.markdown("##### 📂 분석 대상 ZIP 선택")
 
     current_zips = st.session_state.get('ftp_zip_list', [])
     selected_ftp_zips = st.multiselect(

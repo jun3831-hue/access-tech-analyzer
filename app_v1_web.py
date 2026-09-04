@@ -17,6 +17,8 @@ import ftplib
 import tempfile
 import io
 import re
+import posixpath
+import stat
 from collections import Counter
 import pandas as pd
 import numpy as np
@@ -212,6 +214,196 @@ def list_remote_zip_files(host, port, user, password, remote_dir) -> list:
             return zip_files
         except Exception:
             return []
+
+
+DEFAULT_RAW_ZIPS_DIR = "/Personal/전광용/260728_Analyzer Tool/raw_zips"
+
+
+@st.cache_data(ttl=15, show_spinner=False)
+def browse_remote_directory(host, port, user, password, remote_dir) -> dict:
+    try:
+        port_int = int(str(port).strip())
+    except Exception:
+        port_int = 10022
+
+    clean_dir = remote_dir.strip() if remote_dir and remote_dir.strip() else '/'
+    clean_dir = clean_dir.replace('\\', '/')
+    if not clean_dir.startswith('/'):
+        clean_dir = '/' + clean_dir
+    clean_dir = posixpath.normpath(clean_dir)
+
+    is_sftp = (port_int != 21)
+
+    if is_sftp and HAS_PARAMIKO:
+        try:
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh.connect(host, port=port_int, username=user, password=password, timeout=10)
+            sftp = ssh.open_sftp()
+
+            file_attrs = sftp.listdir_attr(clean_dir)
+            subdirs = []
+            files = []
+
+            for attr in file_attrs:
+                fname = attr.filename
+                if fname in ['.', '..']:
+                    continue
+                if stat.S_ISDIR(attr.st_mode):
+                    subdirs.append(fname)
+                else:
+                    sz_bytes = attr.st_size
+                    if sz_bytes >= 1024 * 1024:
+                        sz_str = f"{sz_bytes / (1024 * 1024):.2f} MB"
+                    elif sz_bytes >= 1024:
+                        sz_str = f"{sz_bytes / 1024:.1f} KB"
+                    else:
+                        sz_str = f"{sz_bytes} B"
+
+                    files.append({
+                        "name": fname,
+                        "size": sz_str,
+                        "size_bytes": sz_bytes,
+                        "is_zip": fname.lower().endswith('.zip')
+                    })
+
+            subdirs = sorted(subdirs, key=lambda s: [int(t) if t.isdigit() else t.lower() for t in re.split(r'(\d+)', str(s))])
+            files = sorted(files, key=lambda f: [int(t) if t.isdigit() else t.lower() for t in re.split(r'(\d+)', str(f['name']))])
+
+            sftp.close()
+            ssh.close()
+            return {"subdirs": subdirs, "files": files, "error": None}
+        except Exception as ex:
+            return {"subdirs": [], "files": [], "error": str(ex)}
+    else:
+        try:
+            ftp = ftplib.FTP()
+            ftp.connect(host, port_int, timeout=10)
+            ftp.login(user, password)
+            ftp.set_pasv(True)
+            if clean_dir != '/':
+                ftp.cwd(clean_dir)
+            filenames = ftp.nlst()
+            subdirs = []
+            files = []
+            for fn in filenames:
+                if fn in ['.', '..']:
+                    continue
+                files.append({
+                    "name": fn,
+                    "size": "N/A",
+                    "size_bytes": 0,
+                    "is_zip": fn.lower().endswith('.zip')
+                })
+            ftp.quit()
+            return {"subdirs": subdirs, "files": files, "error": None}
+        except Exception as ex:
+            return {"subdirs": [], "files": [], "error": str(ex)}
+
+
+@st.dialog("📂 SFTP 원격 파일/폴더 탐색기", width="large")
+def show_remote_folder_dialog(ftp_host, ftp_port, ftp_user, ftp_pass):
+    if 'browse_nav_dir' not in st.session_state or not st.session_state['browse_nav_dir']:
+        st.session_state['browse_nav_dir'] = st.session_state.get('active_remote_dir', DEFAULT_RAW_ZIPS_DIR)
+
+    cur_nav = st.session_state['browse_nav_dir']
+    cur_nav = cur_nav.replace('\\', '/')
+    if not cur_nav.startswith('/'):
+        cur_nav = '/' + cur_nav
+    cur_nav = posixpath.normpath(cur_nav)
+
+    st.markdown(f"""
+    <div style="background-color: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 8px 12px; margin-bottom: 10px;">
+        <span style="font-size: 11px; color: #94a3b8; font-weight: 600;">현재 탐색 경로:</span><br/>
+        <span style="font-size: 13px; color: #38bdf8; font-family: monospace; font-weight: 700; word-break: break-all;">{cur_nav}</span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col_nav1, col_nav2, col_nav3 = st.columns([0.34, 0.33, 0.33])
+    with col_nav1:
+        parent_dir = posixpath.dirname(cur_nav.rstrip('/'))
+        if not parent_dir:
+            parent_dir = '/'
+        is_root = (cur_nav.strip().rstrip('/') in ['', '/'])
+        if st.button("⬆️ 상위 폴더", disabled=is_root, use_container_width=True, key="dlg_btn_up"):
+            st.session_state['browse_nav_dir'] = parent_dir
+            st.rerun()
+
+    with col_nav2:
+        if st.button("🏠 기본 (raw_zips)", use_container_width=True, key="dlg_btn_home"):
+            st.session_state['browse_nav_dir'] = DEFAULT_RAW_ZIPS_DIR
+            st.rerun()
+
+    with col_nav3:
+        if st.button("🔄 새로고침", use_container_width=True, key="dlg_btn_refresh"):
+            browse_remote_directory.clear()
+            st.rerun()
+
+    with st.spinner("원격 디렉토리 조회 중..."):
+        scan_res = browse_remote_directory(ftp_host, ftp_port, ftp_user, ftp_pass, cur_nav)
+
+    if scan_res.get("error"):
+        st.error(f"❌ 경로 조회 오류: {scan_res['error']}")
+        if st.button("닫기", use_container_width=True, key="dlg_btn_close_err"):
+            st.session_state['show_explorer_dialog'] = False
+            st.rerun()
+        return
+
+    subdirs = scan_res.get("subdirs", [])
+    files = scan_res.get("files", [])
+    zip_count = sum(1 for f in files if f.get('is_zip'))
+
+    if subdirs:
+        col_sel, col_go = st.columns([0.76, 0.24])
+        with col_sel:
+            target_sub = st.selectbox(
+                "📁 하위 폴더 목록:",
+                options=["(진입할 하위 폴더를 선택하세요)"] + subdirs,
+                key="dlg_sub_picker",
+                label_visibility="collapsed"
+            )
+        with col_go:
+            if st.button("진입 ➔", use_container_width=True, key="dlg_btn_enter_sub"):
+                if target_sub and target_sub != "(진입할 하위 폴더를 선택하세요)":
+                    st.session_state['browse_nav_dir'] = posixpath.join(cur_nav, target_sub)
+                    st.rerun()
+
+    st.markdown("---")
+    st.markdown(f"##### 📋 폴더 내용물 전수 ({len(subdirs)}개 폴더, {len(files)}개 파일 | ZIP: {zip_count}개)")
+
+    item_rows = []
+    for d in subdirs:
+        item_rows.append({"구분": "📁 폴더", "항목명": d, "크기": "-", "분석대상": "하위경로"})
+    for f in files:
+        kind = "📦 압축(ZIP)" if f['is_zip'] else "📄 일반파일"
+        target_str = "✅ 분석 대상" if f['is_zip'] else "원시/참조"
+        item_rows.append({"구분": kind, "항목명": f['name'], "크기": f['size'], "분석대상": target_str})
+
+    if item_rows:
+        df_items = pd.DataFrame(item_rows)
+        st.dataframe(
+            df_items,
+            use_container_width=True,
+            height=min(280, 36 + len(item_rows) * 35),
+            hide_index=True
+        )
+    else:
+        st.info("ℹ️ 폴더가 비어 있습니다.")
+
+    st.markdown("---")
+    col_confirm, col_close = st.columns([0.72, 0.28])
+    with col_confirm:
+        if st.button("✅ 이 폴더를 작업 경로로 선택", type="primary", use_container_width=True, key="dlg_btn_confirm_dir"):
+            st.session_state['active_remote_dir'] = cur_nav
+            zip_names = [f['name'] for f in files if f.get('is_zip')]
+            st.session_state['ftp_zip_list'] = zip_names
+            st.session_state['ftp_zip_list_dir'] = cur_nav
+            st.session_state['show_explorer_dialog'] = False
+            st.rerun()
+    with col_close:
+        if st.button("닫기", use_container_width=True, key="dlg_btn_close_dlg"):
+            st.session_state['show_explorer_dialog'] = False
+            st.rerun()
 
 
 def download_remote_file(host, port, user, password, remote_dir, filename, local_dest_path) -> bool:
@@ -573,16 +765,28 @@ except Exception:
 saved_cfg = load_saved_config()
 default_host = secrets_ftp.get('host') or saved_cfg.get('host', '113.217.230.27')
 default_port = str(secrets_ftp.get('port') or saved_cfg.get('port', 10022))
-default_dir = secrets_ftp.get('remote_dir') or saved_cfg.get('remote_dir', '/Personal/전광용/260826 DM TEST')
+default_dir = DEFAULT_RAW_ZIPS_DIR
 default_cache_dir = secrets_ftp.get('remote_cache_dir') or saved_cfg.get('remote_cache_dir', '/Personal/전광용/260728_Analyzer Tool/sessions')
 default_user = secrets_ftp.get('user') or saved_cfg.get('user', 'skt2')
 default_pass = secrets_ftp.get('password') or saved_cfg.get('password', 'setup2')
 
 cache_mgr = SessionCacheManager()
 
-if 'ftp_zip_list' not in st.session_state or not st.session_state['ftp_zip_list']:
-    auto_zips = list_remote_zip_files(default_host, default_port, default_user, default_pass, default_dir)
+if 'active_remote_dir' not in st.session_state:
+    st.session_state['active_remote_dir'] = DEFAULT_RAW_ZIPS_DIR
+
+if 'browse_nav_dir' not in st.session_state:
+    st.session_state['browse_nav_dir'] = DEFAULT_RAW_ZIPS_DIR
+
+if 'show_explorer_dialog' not in st.session_state:
+    st.session_state['show_explorer_dialog'] = False
+
+active_dir = st.session_state['active_remote_dir']
+
+if 'ftp_zip_list' not in st.session_state or st.session_state.get('ftp_zip_list_dir') != active_dir:
+    auto_zips = list_remote_zip_files(default_host, default_port, default_user, default_pass, active_dir)
     st.session_state['ftp_zip_list'] = auto_zips
+    st.session_state['ftp_zip_list_dir'] = active_dir
 
 if 'available_cache_sessions' not in st.session_state:
     local_s = cache_mgr.list_local_sessions()
@@ -727,7 +931,6 @@ with st.sidebar:
 
     ftp_host = default_host
     ftp_port = default_port
-    ftp_dir = default_dir
     ftp_user = default_user
     ftp_pass = default_pass
 
@@ -738,8 +941,6 @@ with st.sidebar:
         with col_port:
             ftp_port = st.text_input("Port", value=default_port, key="web_ftp_port")
 
-        ftp_dir = st.text_input("원격 경로", value=default_dir, key="web_ftp_dir")
-
         col_u, col_p = st.columns(2)
         with col_u:
             ftp_user = st.text_input("User", value=default_user, key="web_ftp_user")
@@ -748,24 +949,55 @@ with st.sidebar:
 
         if st.button("🔄 파일 목록 다시 조회", key="btn_web_reload_zips", use_container_width=True):
             with st.spinner("서버에서 ZIP 검색 중..."):
-                zips = list_remote_zip_files(ftp_host, ftp_port, ftp_user, ftp_pass, ftp_dir)
+                zips = list_remote_zip_files(ftp_host, ftp_port, ftp_user, ftp_pass, active_dir)
                 st.session_state['ftp_zip_list'] = zips
+                st.session_state['ftp_zip_list_dir'] = active_dir
                 if zips:
                     try:
                         p_val = int(str(ftp_port).strip())
                     except Exception:
                         p_val = 10022
-                    save_config({'host': ftp_host, 'port': p_val, 'user': ftp_user, 'password': ftp_pass, 'remote_dir': ftp_dir})
+                    save_config({'host': ftp_host, 'port': p_val, 'user': ftp_user, 'password': ftp_pass, 'remote_dir': DEFAULT_RAW_ZIPS_DIR})
                     st.success(f"{len(zips)}개 파일 로드 완료!")
 
     st.markdown("---")
     st.markdown("##### 📂 분석 대상 ZIP 선택")
+
+    # Clean Active Directory Box
+    st.markdown(f"""
+    <div style="background-color: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 6px 10px; margin-bottom: 6px;">
+        <div style="font-size: 11px; color: #94a3b8; font-weight: 500;">현재 원격 경로:</div>
+        <div style="font-size: 12px; color: #38bdf8; font-family: monospace; font-weight: 600; word-break: break-all;">{active_dir}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col_exp, col_res = st.columns([0.72, 0.28])
+    with col_exp:
+        if st.button("🔍 원격 폴더 탐색기", use_container_width=True, key="btn_web_open_folder_dlg"):
+            st.session_state['browse_nav_dir'] = active_dir
+            st.session_state['show_explorer_dialog'] = True
+            st.rerun()
+    with col_res:
+        if st.button("🏠 기본", help="기본 raw_zips 경로로 복귀", use_container_width=True, key="btn_web_reset_raw_zips"):
+            st.session_state['active_remote_dir'] = DEFAULT_RAW_ZIPS_DIR
+            st.session_state['browse_nav_dir'] = DEFAULT_RAW_ZIPS_DIR
+            with st.spinner("raw_zips 파일 로드 중..."):
+                zips = list_remote_zip_files(ftp_host, ftp_port, ftp_user, ftp_pass, DEFAULT_RAW_ZIPS_DIR)
+                st.session_state['ftp_zip_list'] = zips
+                st.session_state['ftp_zip_list_dir'] = DEFAULT_RAW_ZIPS_DIR
+            st.rerun()
+
+    if st.session_state.get('show_explorer_dialog', False):
+        show_remote_folder_dialog(ftp_host, ftp_port, ftp_user, ftp_pass)
+
+    current_zips = st.session_state.get('ftp_zip_list', [])
     selected_ftp_zips = st.multiselect(
-        "분석할 원격 ZIP 파일:",
-        options=st.session_state.get('ftp_zip_list', []),
-        default=st.session_state.get('ftp_zip_list', [])
+        f"분석할 원격 ZIP 파일 ({len(current_zips)}개):",
+        options=current_zips,
+        default=current_zips,
+        key="web_ms_ftp_zips"
     )
-    
+
     uploaded_files = st.file_uploader("또는 로컬 ZIP 업로드", type=['zip'], accept_multiple_files=True)
 
     st.markdown("---")
@@ -785,7 +1017,7 @@ if start_analysis:
                 dl_zips = []
                 for zn in selected_ftp_zips:
                     loc_z = os.path.join(work_dir, zn)
-                    if download_remote_file(ftp_host, ftp_port, ftp_user, ftp_pass, ftp_dir, zn, loc_z):
+                    if download_remote_file(ftp_host, ftp_port, ftp_user, ftp_pass, active_dir, zn, loc_z):
                         dl_zips.append(loc_z)
 
                 if uploaded_files:

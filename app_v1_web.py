@@ -912,13 +912,11 @@ if 'selected_session_key' not in st.session_state:
 # SIDEBAR
 # =============================================================================
 with st.sidebar:
-    st.markdown("### 📡 OPTis AI Web Analyzer")
-    st.caption("2D GIS 대화형 분석 대시보드")
+    st.markdown("### 📡 DM AGENT")
 
     # -------------------------------------------------------------------------
     # 0. 📂 사전 분석 세션 불러오기 (측정일 기준 표준 명명)
     # -------------------------------------------------------------------------
-    st.markdown("---")
     st.markdown("##### 📂 사전 분석 세션 불러오기")
 
     cached_list = st.session_state.get('available_cache_sessions', [])
@@ -983,9 +981,9 @@ with st.sidebar:
         # Session Rows: [Expander (82%)] [✕ (18%)]
         for sk in s_keys:
             clean_name = str(sk).replace('.zip', '')
-            short_name = clean_name
+            safe_display_name = clean_name.replace('~', r'\~')
             is_cur = (sk == active_k)
-            expander_title = f"{'🟢' if is_cur else '⚪'} {short_name}"
+            expander_title = f"{'🟢' if is_cur else '⚪'} {safe_display_name}"
 
             col_exp, col_del = st.columns([0.82, 0.18])
             with col_exp:

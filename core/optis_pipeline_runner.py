@@ -402,6 +402,7 @@ class OptisPipelineRunner:
                     combined_txt_reports.append(p_item.get('txt_rep', ''))
 
                 total_episodes = sum(len(d.get('episodes', [])) for d in group_port_dict.values())
+                total_pts = sum(len(d['df_timeline']) for d in group_port_dict.values())
                 meas_date_str = ""
                 for pk, p_item in group_port_dict.items():
                     tl = p_item.get('df_timeline', pd.DataFrame())

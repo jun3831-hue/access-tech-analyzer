@@ -60,6 +60,7 @@ def clean_drm_name(filename_or_path: str) -> str:
         base = base[:-4]
     if base.lower().endswith('.csv'):
         base = base[:-4]
+    base = base.replace('~', '～')
     m = re.search(r'^(.*?[-_]M\d+)', base, flags=re.IGNORECASE)
     if m:
         return m.group(1).strip()
@@ -72,6 +73,7 @@ def extract_route_group_key(name_or_path: str) -> str:
         base = base[:-4]
     if base.lower().endswith('.csv'):
         base = base[:-4]
+    base = base.replace('~', '～')
     m = re.split(r'[-_#]M\d+', base, flags=re.IGNORECASE)
     if m and len(m) > 0 and m[0].strip():
         return m[0].strip()

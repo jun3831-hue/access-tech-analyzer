@@ -59,9 +59,26 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for compact buttons & natural high-visibility inputs
+# Custom CSS for pure dark mode enforcement, compact buttons & natural high-visibility inputs
 st.markdown("""
 <style>
+    /* ---------------------------------------------------------
+       1. Global Pure Dark Mode Enforcement (OS/Browser Light-mode Override)
+       --------------------------------------------------------- */
+    :root {
+        color-scheme: dark !important;
+    }
+    html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
+        background-color: #0f172a !important;
+        color: #f8fafc !important;
+    }
+
+    /* All text elements in App Viewport */
+    .stApp, .stApp p, .stApp span, .stApp label, .stApp div,
+    .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6 {
+        color: #f8fafc;
+    }
+
     /* Hide Deploy button & Menu */
     .stDeployButton { display: none !important; }
     #MainMenu { display: none !important; }
@@ -102,7 +119,9 @@ st.markdown("""
         border-radius: 8px;
     }
 
-    /* Dark sidebar base styling */
+    /* ---------------------------------------------------------
+       2. Sidebar Pure Dark Styling
+       --------------------------------------------------------- */
     section[data-testid="stSidebar"] {
         background-color: #0f172a !important;
     }
@@ -126,7 +145,10 @@ st.markdown("""
     /* Natural Slate Gray Input Styling */
     section[data-testid="stSidebar"] input[type="text"],
     section[data-testid="stSidebar"] input[type="password"],
-    section[data-testid="stSidebar"] input[type="number"] {
+    section[data-testid="stSidebar"] input[type="number"],
+    .stApp input[type="text"],
+    .stApp input[type="password"],
+    .stApp input[type="number"] {
         background-color: #1e293b !important;
         border: 1px solid #334155 !important;
         color: #f8fafc !important;
@@ -135,7 +157,8 @@ st.markdown("""
         font-size: 12px !important;
         height: 32px !important;
     }
-    section[data-testid="stSidebar"] input:focus {
+    section[data-testid="stSidebar"] input:focus,
+    .stApp input:focus {
         border-color: #38bdf8 !important;
         box-shadow: 0 0 0 1px #38bdf8 !important;
     }
@@ -147,6 +170,77 @@ st.markdown("""
     section[data-testid="stSidebar"] hr {
         margin-top: 10px !important;
         margin-bottom: 10px !important;
+    }
+
+    /* ---------------------------------------------------------
+       3. Main Viewport Controls (Tabs, Select, Dialogs, Tables)
+       --------------------------------------------------------- */
+    /* Tabs styling for pure dark mode */
+    button[data-baseweb="tab"] {
+        background-color: transparent !important;
+        color: #94a3b8 !important;
+    }
+    button[data-baseweb="tab"][aria-selected="true"] {
+        color: #38bdf8 !important;
+        border-bottom-color: #38bdf8 !important;
+    }
+    button[data-baseweb="tab"]:hover {
+        color: #f8fafc !important;
+    }
+
+    /* BaseWeb Selectbox & Dropdowns (Main & Sidebar) */
+    div[data-baseweb="select"] > div {
+        background-color: #1e293b !important;
+        border-color: #334155 !important;
+        color: #f8fafc !important;
+    }
+    div[data-baseweb="select"] * {
+        color: #f8fafc !important;
+    }
+    div[data-baseweb="popover"], div[data-baseweb="menu"], ul[data-testid="stVirtualDropdown"] {
+        background-color: #1e293b !important;
+        color: #f8fafc !important;
+        border: 1px solid #334155 !important;
+    }
+    ul[data-testid="stVirtualDropdown"] li {
+        background-color: #1e293b !important;
+        color: #f8fafc !important;
+    }
+
+    /* Radio buttons */
+    div[data-testid="stRadio"] label span {
+        color: #f8fafc !important;
+    }
+
+    /* Expanders */
+    div[data-testid="stExpander"] {
+        background-color: #1e293b !important;
+        border: 1px solid #334155 !important;
+        border-radius: 6px !important;
+    }
+    div[data-testid="stExpander"] summary {
+        color: #f8fafc !important;
+    }
+
+    /* Modal / Dialog styling (@st.dialog) */
+    div[data-modal-container="true"],
+    div[role="dialog"] {
+        background-color: #0f172a !important;
+        color: #f8fafc !important;
+        border: 1px solid #334155 !important;
+    }
+    div[role="dialog"] * {
+        color: #f8fafc !important;
+    }
+    div[role="dialog"] button {
+        background-color: #1e293b !important;
+        border: 1px solid #334155 !important;
+        color: #f8fafc !important;
+    }
+
+    /* Streamlit Dataframe dark container */
+    [data-testid="stDataFrame"] {
+        background-color: #1e293b !important;
     }
 </style>
 """, unsafe_allow_html=True)

@@ -89,16 +89,16 @@ def format_ports_summary(ports: List[str]) -> str:
     if len(nums) == len(ports):
         nums = sorted(nums)
         if nums == list(range(nums[0], nums[-1] + 1)):
-            return f"M{nums[0]}~M{nums[-1]}"
+            return f"M{nums[0]}～M{nums[-1]}"
     
-    return f"{ports[0]}~{ports[-1]}"
+    return f"{ports[0]}～{ports[-1]}"
 
 
 def format_standard_session_name(date_val: Any, scenario_name: str, ports: List[str]) -> str:
     """
     Creates standard session name: [YYMMDD]_[Route/Scenario]-[Ports]
     e.g. 260623_0623 상무지구-M1
-         250715_이천~충주 하행-M1~M4
+         250715_이천～충주 하행-M1～M4
     """
     yymmdd = extract_yymmdd(date_val)
     
@@ -106,20 +106,25 @@ def format_standard_session_name(date_val: Any, scenario_name: str, ports: List[
     sc_clean = re.sub(r'^Optis_V12_', '', scenario_name, flags=re.I)
     sc_clean = re.sub(r'[-_#]M\d+.*$', '', sc_clean, flags=re.I)
     sc_clean = re.sub(r'[-_]M\d+~M\d+.*$', '', sc_clean, flags=re.I)
+    sc_clean = re.sub(r'[-_]M\d+～M\d+.*$', '', sc_clean, flags=re.I)
     sc_clean = sc_clean.replace('_Map', '').replace('_Master', '').strip()
     
-    # Standardize route wave tilde (이천충주하행 -> 이천~충주 하행)
+    # Standardize route wave tilde using full-width tilde (이천충주하행 -> 이천～충주 하행)
     if '이천충주' in sc_clean:
-        sc_clean = sc_clean.replace('이천충주', '이천~충주 ')
+        sc_clean = sc_clean.replace('이천충주', '이천～충주 ')
     elif '충주문경' in sc_clean:
-        sc_clean = sc_clean.replace('충주문경', '충주~문경 ')
+        sc_clean = sc_clean.replace('충주문경', '충주～문경 ')
     elif '문경충주' in sc_clean:
-        sc_clean = sc_clean.replace('문경충주', '문경~충주 ')
+        sc_clean = sc_clean.replace('문경충주', '문경～충주 ')
     elif '충주이천' in sc_clean:
-        sc_clean = sc_clean.replace('충주이천', '충주~이천 ')
+        sc_clean = sc_clean.replace('충주이천', '충주～이천 ')
+
+    # Convert any remaining half-width tilde to full-width tilde
+    sc_clean = sc_clean.replace('~', '～')
 
     ports_summary = format_ports_summary(ports)
-    return f"{yymmdd}_{sc_clean}-{ports_summary}"
+    res_name = f"{yymmdd}_{sc_clean}-{ports_summary}"
+    return res_name.replace('~', '～')
 
 
 class SessionCacheManager:
@@ -153,6 +158,7 @@ class SessionCacheManager:
         """
         Saves a session bundle to the local cache directory.
         """
+        session_name = session_name.replace('~', '～')
         session_dir = os.path.join(self.local_base_dir, session_name)
         os.makedirs(session_dir, exist_ok=True)
 
@@ -195,6 +201,7 @@ class SessionCacheManager:
         """
         Loads a local session bundle directly into memory for instant Streamlit display.
         """
+        session_name = session_name.replace('~', '～')
         session_dir = os.path.join(self.local_base_dir, session_name)
         if not os.path.exists(session_dir):
             return None
@@ -314,6 +321,7 @@ class SessionCacheManager:
         Uploads local session bundle to remote FTP/SFTP:
         /Optis_Cache/sessions/[session_name]/
         """
+        session_name = session_name.replace('~', '～')
         r_base = (remote_base_dir or self.REMOTE_BASE_CACHE_DIR).strip().rstrip('/')
         r_session_dir = f"{r_base}/{session_name}"
         l_dir = local_session_dir or os.path.join(self.local_base_dir, session_name)
@@ -395,6 +403,7 @@ class SessionCacheManager:
         """
         Downloads a remote session bundle directly into memory (and saves to local cache).
         """
+        session_name = session_name.replace('~', '～')
         r_base = (remote_base_dir or self.REMOTE_BASE_CACHE_DIR).strip().rstrip('/')
         r_session_dir = f"{r_base}/{session_name}"
         port_int = self._parse_port(port)

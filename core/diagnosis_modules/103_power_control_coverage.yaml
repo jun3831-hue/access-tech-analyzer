@@ -1,0 +1,94 @@
+version: "2.0.0"
+module_id: "MOD_POWER_CONTROL_COVERAGE"
+module_name: "상향 전력 제어 및 셀 에지 커버리지 통합 진단 모듈"
+category: "POWER_CONTROL_COVERAGE"
+targeting:
+  network_mode: ["ALL"]
+  active_vendor: ["ALL"]
+  call_phase: ["UL_Traffic"]
+
+rules:
+  - id: "DIAG_P_01"
+    name: "UL 최대 송신 전력 도달 (UL MTPL 23dBm Reached)"
+    severity: "HIGH"
+    detection:
+      target_source: "QC_KPI, 320_POWER_LIMIT_MATRIX"
+      condition: "PUSCH Power >= (PUSCH MTPL - 0.5) dBm in > 40% of UL slots"
+      phase: "UL_Traffic"
+    analysis:
+      root_cause: "단말 송신 전력이 최대치(23dBm)에 포화되어 상향 MCS 강제 강하 및 커버리지 에지 병목 발생"
+      correlation_fields:
+        - "[Call & 5G KPI PCell RF PUSCH Power [dBm]]"
+        - "[Call & 5G KPI PCell RF ENDC Tx Power [dBm]]"
+        - "[Call & 5G KPI PCell Layer1 UL MCS (Avg)]"
+        - "[Call & 5G KPI PCell Layer1 UL RB Num (Avg)]"
+        - "[Call & 5G KPI PCell RF Serving SS-RSRP [dBm]]"
+    improvement:
+      parameter: "p0-NominalWithGrant, alpha"
+      recommended_action: "p0-NominalWithGrant +5dB 상향 및 alpha=1.0 완전 보상 적용, UL 2Tx 활성화"
+      vendor_specific:
+        nokia: "set UL_POWER_CTRL p0Nominal=-80, alpha=1.0"
+        samsung: "MOD NRULPWR: P0Nominal=-80, Alpha=100"
+        ericsson: "set UlPowerControl p0NominalWithGrant=-80, alpha=1.0"
+
+  - id: "DIAG_P_02"
+    name: "TPC 루프 진동 에러 (TPC Closed-Loop Oscillation)"
+    severity: "MEDIUM"
+    detection:
+      target_source: "QC_KPI, MAC_UL_PHY_CHA_PC"
+      condition: "PUSCH Power fluctuates > 6dB within 1 second under stable RSRP"
+      phase: "UL_Traffic"
+    analysis:
+      root_cause: "기지국 Closed-Loop TPC 명령 오설정 및 Step Size 과다로 인한 전력 진동"
+      correlation_fields:
+        - "[Call & 5G KPI PCell RF PUSCH Power [dBm]]"
+        - "[Call & 5G KPI PCell RF Serving SS-RSRP [dBm]]"
+    improvement:
+      parameter: "tpc-StepSize"
+      recommended_action: "TPC Step Size를 1dB로 세밀화하여 전력 진동 억제"
+      vendor_specific:
+        nokia: "set TPC_CONFIG tpcStepSize=1dB"
+        samsung: "MOD NRTPC: StepSize=1"
+        ericsson: "set TpcConfig stepSize=1"
+
+  - id: "DIAG_P_03"
+    name: "SRS-PUSCH 전력 불균형 (SRS-to-PUSCH Power Imbalance)"
+    severity: "MEDIUM"
+    detection:
+      target_source: "MAC_UL_PHY_CHA_PC, QC_KPI"
+      condition: "abs(SRS Tx Power - PUSCH Actual Power) > 6.0 dB"
+      phase: "UL_Traffic"
+    analysis:
+      root_cause: "SRS 송신 전력과 PUSCH 데이터 송신 전력 간 괴리로 상향 빔포밍 가중치 왜곡"
+      correlation_fields:
+        - "[Call & 5G KPI PCell RF SRS Power [dBm]]"
+        - "[Call & 5G KPI PCell RF PUSCH Power [dBm]]"
+        - "[Call & 5G KPI PCell RF Serving SS-SINR [dB]]"
+    improvement:
+      parameter: "p0-SRS, pathlossReferenceRS-Pos0"
+      recommended_action: "SRS 전력 오프셋과 PUSCH 기준 경로손실 동기화"
+      vendor_specific:
+        nokia: "set SRS_POWER_CTRL p0Srs=syncPusch"
+        samsung: "MOD NRSRSPWR: P0SrsSync=ENABLE"
+        ericsson: "set SrsPowerControl syncPusch=true"
+
+  - id: "DIAG_P_05"
+    name: "UL HARQ 재전송 폭풍 (PUSCH HARQ Storm)"
+    severity: "HIGH"
+    detection:
+      target_source: "QC_KPI"
+      condition: "PUSCH BLER > 15.0% and UL MCS < 14.0 for > 3 consecutive seconds"
+      phase: "UL_Traffic"
+    analysis:
+      root_cause: "기지국 상향 수신단 간섭(RoT 상승) 또는 단말 상향 주파수 오차로 인한 PUSCH NACK 폭증"
+      correlation_fields:
+        - "[Call & 5G KPI PCell Layer1 UL BLER [%]]"
+        - "[Call & 5G KPI PCell Layer1 UL MCS (Avg)]"
+        - "[Call & 5G KPI PCell RF PUSCH Power [dBm]]"
+    improvement:
+      parameter: "pusch-DMRS-AdditionalPosition"
+      recommended_action: "PUSCH DMRS 추가 심볼 활성화(pos1 -> pos2) 및 상향 RoT 간섭원 탐색"
+      vendor_specific:
+        nokia: "set PUSCH_CONFIG puschAddPos=pos2"
+        samsung: "MOD NRPUSCH: AddPos=pos2"
+        ericsson: "set PuschConfig additionalPosition=pos2"

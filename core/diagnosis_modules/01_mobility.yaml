@@ -1,0 +1,248 @@
+domain: "01_mobility"
+domain_name: "핸드오버 및 이동성 분석"
+version: "3.0.0"
+
+rules:
+  # ---------------------------------------------------------------------------
+  # [DIAG_M_01] 핑퐁 핸드오버 (Ping-Pong Handover)
+  # ---------------------------------------------------------------------------
+  - id: "DIAG_M_01_PINGPONG"
+    name: "5초 이내 핑퐁 핸드오버 (Ping-Pong Handover)"
+    phase: "ALL"
+    target_rat: ["LTE", "NR"]
+    network_mode: ["LTE", "NSA", "SA"]
+    severity_default: "MED"
+    detection:
+      target_source: "12_Mobility_Meas, Fav_Mobility, df_timeline"
+      condition: "Return to original Cell (PCI) within 5.0s via transition path (PCI_A -> PCI_B -> PCI_A)"
+    thresholds:
+      time_window_sec: 5.0
+      min_dwell_sec: 0.5
+    severity_levels:
+      HIGH: "왕복 체류 시간 <= 2.0초 또는 연속 핑퐁 >= 3회 또는 서빙 RSRP <= -105 dBm 급락"
+      MED: "단순 1회 왕복 핑퐁 (2.0초 < Dwell <= 5.0초)"
+      LOW: "강전계 상태의 단순 1회 셀 경계 이동"
+    correlation_fields:
+      - "[TIME_STAMP]"
+      - "[LTE_Serving_PCI] / [NR_Serving_PCI]"
+      - "[HO_Status]"
+      - "[Serving_RSRP]"
+      - "[NBR_1_PCI]"
+      - "[NBR_1_RSRP]"
+    badge_template: "[{time}] {rat} 핑퐁 ({pci_chain}) ({dur_sec}초)"
+
+  # ---------------------------------------------------------------------------
+  # [DIAG_M_02] 동일 주파수 A3 방치 및 요청 무응답 (호 정상 유지)
+  # ---------------------------------------------------------------------------
+  - id: "DIAG_M_02_A3_UNHANDLED"
+    name: "동일 주파수(Intra-Freq) A3 요청 무응답 (호 정상 유지)"
+    phase: "ALL"
+    target_rat: ["LTE", "NR"]
+    network_mode: ["LTE", "NSA", "SA"]
+    severity_default: "LOW"
+    detection:
+      target_source: "12_Mobility_Meas, Fav_Mobility"
+      condition: "UE transmitted Event A3 measurement reports but network issued no HO Command"
+      exit_filter: "3GPP TS 36.331 Leaving Criteria: If Serving RSRP >= Target RSRP at session end, treat as Normal Transient and exclude from fault list"
+    thresholds:
+      repeat_count_min: 3
+      inversion_gap_sec: 2.5
+    severity_levels:
+      MED: "A3 무응답 지속 시간 >= 5.0초 또는 A3 MR 전송 횟수 >= 20회"
+      LOW: "A3 무응답 지속 시간 < 5.0초 및 A3 MR 전송 횟수 < 20회"
+    correlation_fields:
+      - "[Event]"
+      - "[Serving_PCI]"
+      - "[Serving_RSRP]"
+      - "[NBR_1_PCI]"
+      - "[NBR_1_RSRP]"
+    badge_template: "[{time}] {rat} 타겟(PCI {target_pci}) HO 요청 무응답 (A3 MR {rep_cnt}회)"
+
+  # ---------------------------------------------------------------------------
+  # [DIAG_M_03] 3GPP 표준 지연 핸드오버 (Too Late Handover / HO 방치 후 호 단절)
+  # ---------------------------------------------------------------------------
+  - id: "DIAG_M_03_TOO_LATE_HO"
+    name: "3GPP 표준 지연 핸드오버 (HO 방치 후 RLF 및 RRE 거절 호 단절)"
+    phase: "ALL"
+    target_rat: ["LTE", "NR"]
+    network_mode: ["LTE", "NSA", "SA"]
+    severity_default: "HIGH"
+    detection:
+      target_source: "12_Mobility_Meas, Fav_Event_(Detail), df_events"
+      condition: "3GPP TS 36.300/38.300: RLF or RRE Request/Reject occurs on Serving Cell within 10.0s after unhandled Event A3 reports for Target Cell"
+    thresholds:
+      backward_causal_window_sec: 10.0
+    severity_levels:
+      HIGH: "HO 명령 미발행 방치로 인한 서빙 링크 붕괴(RLF) 및 RRE 재수립 거절 호 단절"
+    correlation_fields:
+      - "[Event]"
+      - "[Call & Voice Call Event Detail Code1]"
+      - "[Serving_PCI]"
+      - "[NBR_1_PCI]"
+      - "[Serving_RSRP]"
+      - "[Serving_SINR]"
+    badge_template: "🚨 [{time}] {rat} 타겟(PCI {target_pci}) HO 방치 후 호 단절 (A3 MR {rep_cnt}회)"
+
+  # ---------------------------------------------------------------------------
+  # [DIAG_M_04] 3GPP 표준 조기 핸드오버 (Too Early Handover)
+  # ---------------------------------------------------------------------------
+  - id: "DIAG_M_04_TOO_EARLY_HO"
+    name: "3GPP 표준 조기 핸드오버 (Too Early Handover)"
+    phase: "ALL"
+    target_rat: ["LTE", "NR"]
+    network_mode: ["LTE", "NSA", "SA"]
+    severity_default: "HIGH"
+    detection:
+      target_source: "12_Mobility_Meas, Fav_Event_(Detail)"
+      condition: "3GPP TS 36.300: HO from Cell A to Cell B completes, but RLF occurs in Cell B within 3.0s and UE attempts RRE back to Cell A"
+    thresholds:
+      time_to_rlf_sec: 3.0
+    severity_levels:
+      HIGH: "부적절한 조기 핸드오버로 인한 타겟 즉시 RLF 및 원래 서빙 셀 복귀 실패"
+    correlation_fields:
+      - "[HO_Status]"
+      - "[Serving_PCI]"
+      - "[Call & Voice Call Event Detail Code1]"
+    badge_template: "🚨 [{time}] {rat} 서빙(PCI {src_pci}) ➔ 타겟(PCI {target_pci}) 조기 HO 후 RLF (원래 셀 복귀 실패)"
+
+  # ---------------------------------------------------------------------------
+  # [DIAG_M_05] 3GPP 표준 오전환 핸드오버 (Handover to Wrong Cell)
+  # ---------------------------------------------------------------------------
+  - id: "DIAG_M_05_WRONG_CELL_HO"
+    name: "3GPP 표준 오전환 핸드오버 (Handover to Wrong Cell)"
+    phase: "ALL"
+    target_rat: ["LTE", "NR"]
+    network_mode: ["LTE", "NSA", "SA"]
+    severity_default: "HIGH"
+    detection:
+      target_source: "12_Mobility_Meas, Fav_Event_(Detail)"
+      condition: "3GPP TS 36.300: HO from Cell A to Cell B completes, but RLF occurs in Cell B within 3.0s and UE attempts RRE to 3rd Cell C"
+    thresholds:
+      time_to_rlf_sec: 3.0
+    severity_levels:
+      HIGH: "타겟 셀 오지정 및 간섭으로 인한 타겟 RLF 및 제3 셀 재수립 시도"
+    correlation_fields:
+      - "[HO_Status]"
+      - "[Serving_PCI]"
+      - "[Call & Voice Call Event Detail Code1]"
+    badge_template: "🚨 [{time}] {rat} 타겟(PCI {target_pci}) 오전환 HO 후 RLF (제3셀 PCI {third_pci} 재수립 시도)"
+
+  # ---------------------------------------------------------------------------
+  # [DIAG_M_06] 이종 주파수 핸드오버 지연 및 방치 (Inter-Frequency HO Delay)
+  # ---------------------------------------------------------------------------
+  - id: "DIAG_M_06_INTER_FREQ_HO"
+    name: "이종 주파수(Inter-Freq) 핸드오버 지연 및 방치"
+    phase: "ALL"
+    target_rat: ["LTE", "NR"]
+    network_mode: ["LTE", "NSA", "SA"]
+    severity_default: "MED"
+    detection:
+      target_source: "12_Mobility_Meas, Fav_Mobility"
+      condition: "Serving RSRP degrades (Event A2), UE reports Event A5/A4 for neighbor frequency, but network issues no Inter-Freq HO"
+    thresholds:
+      unhandled_window_sec: 5.0
+    severity_levels:
+      HIGH: "이종 주파수 전환 지연으로 인한 서빙 RLF 및 호 단절 발발"
+      MED: "이종 주파수 전환 지연으로 인한 전계/속도 저하 지속"
+    correlation_fields:
+      - "[Event]"
+      - "[Serving_RSRP]"
+      - "[NBR_1_RSRP]"
+    badge_template: "[{time}] {rat} 이종 주파수 타겟(PCI {target_pci}) HO 전환 지연 (A5 MR {rep_cnt}회)"
+
+  # ---------------------------------------------------------------------------
+  # [DIAG_M_07_A] 5G NSA: Event B1 5G 진입 방치 (5G SCG Addition Stall)
+  # ---------------------------------------------------------------------------
+  - id: "DIAG_M_07_A_NSA_B1_STALL"
+    name: "5G NSA: Event B1-NR 5G 진입 방치 (5G SCG Addition Stall)"
+    phase: "ALL"
+    target_rat: ["NR"]
+    network_mode: ["NSA"]
+    severity_default: "MED"
+    detection:
+      target_source: "12_Mobility_Meas, Fav_Mobility"
+      condition: "UE on LTE reports Event B1 (NR threshold satisfied) >= 3 times, but eNB issues no nr-Config SgNB Addition"
+    thresholds:
+      repeat_count_min: 3
+      stall_duration_sec: 5.0
+    severity_levels:
+      MED: "5G 양호 커버리지 진입에도 LTE 락인 지속 (5G 추가 진입 지연)"
+    correlation_fields:
+      - "[Event]"
+      - "[Serving_RSRP]"
+      - "[NBR_1_RSRP]"
+    badge_template: "[{time}] LTE ➔ 5G NR 커버리지 진입 방치 (Event B1 MR {rep_cnt}회 무응답)"
+
+  # ---------------------------------------------------------------------------
+  # [DIAG_M_07_B] 5G SA: Event B2 LTE Fallback 실패 (5G SA ➔ LTE Inter-RAT Failure)
+  # ---------------------------------------------------------------------------
+  - id: "DIAG_M_07_B_SA_B2_FALLBACK"
+    name: "5G SA: Event B2 LTE Fallback 실패 (5G SA ➔ LTE Inter-RAT Failure)"
+    phase: "ALL"
+    target_rat: ["NR"]
+    network_mode: ["SA"]
+    severity_default: "HIGH"
+    detection:
+      target_source: "12_Mobility_Meas, Fav_Event_(Detail)"
+      condition: "UE in 5G SA reports Event B2 (5G weak, LTE strong), but gNB fails to execute Inter-RAT Handover/Redirection, causing RLF"
+    thresholds:
+      fallback_window_sec: 5.0
+    severity_levels:
+      HIGH: "5G SA 음영 진입 시 LTE Fallback 미처리로 인한 5G SA RLF 호 단절"
+    correlation_fields:
+      - "[Event]"
+      - "[Call & Voice Call Event Detail Code1]"
+      - "[Serving_RSRP]"
+    badge_template: "🚨 [{time}] 5G SA ➔ LTE Inter-RAT Fallback 실패 호 단절 (Event B2 무응답 RLF)"
+
+  # ---------------------------------------------------------------------------
+  # [DIAG_M_08] 중복 PCI 발췌 (Duplicate PCI Collision & Confusion)
+  # ---------------------------------------------------------------------------
+  - id: "DIAG_M_08_PCI_COLLISION"
+    name: "중복 PCI 발췌 (PCI Collision & Confusion)"
+    phase: "ALL"
+    target_rat: ["LTE", "NR"]
+    network_mode: ["LTE", "NSA", "SA"]
+    severity_default: "MED"
+    detection:
+      target_source: "df_timeline (1-sec TimeSeries), L3_MSG"
+      logic: "Same PCI re-encountered after handover departure with distance calculated via Haversine formula"
+    thresholds:
+      distance_threshold_km: 1.0
+      min_departure_seconds: 5.0
+    severity_levels:
+      HIGH: "이탈 후 재검출 거리 < 1.0km 또는 시간 < 10초 (동일 커버리지 내 직접 충돌/HO 교란)"
+      MED: "이탈 후 재검출 거리 1.0km ~ 3.0km (인접 셀 간 간섭 및 Confusion 위험)"
+      LOW: "이탈 후 재검출 거리 >= 3.0km (단순 원거리 PCI 재사용 발췌)"
+    correlation_fields:
+      - "[TIME_STAMP]"
+      - "[LATITUDE]"
+      - "[LONGITUDE]"
+      - "[NR_PCI] / [LTE_PCI]"
+    badge_template: "[{time}] {rat} 중복 PCI 발췌 (PCI {pci})"
+
+  # ---------------------------------------------------------------------------
+  # [DIAG_M_09] 5G NR PSCell 빔 핑퐁 (Intra-Cell Beam Churn)
+  # ---------------------------------------------------------------------------
+  - id: "DIAG_M_09_BEAM_CHURN"
+    name: "5G NR PSCell 빔 핑퐁 (Intra-Cell Beam Churn)"
+    phase: "ALL"
+    target_rat: ["NR"]
+    network_mode: ["NSA", "SA"]
+    severity_default: "MED"
+    detection:
+      target_source: "12_Mobility_Meas, df_timeline"
+      condition: "Rapid oscillation between SSB Beams (SSB_A -> SSB_B -> SSB_A) within same PCI within 5.0s"
+    thresholds:
+      time_window_sec: 5.0
+      bounce_count_min: 2
+    severity_levels:
+      HIGH: "빔 핑퐁 지속 중 SS-RSRP 음영 급락(< -105 dBm) 또는 SCG Failure 유발"
+      MED: "5초 이내 동일 PCI 내 2회 이상 빔 왕복 및 속도 저조 동반"
+      LOW: "양호 전계(SS-RSRP >= -90 dBm)에서의 단순 1회 빔 트래킹 전환"
+    correlation_fields:
+      - "[TIME_STAMP]"
+      - "[NR_Serving_PCI]"
+      - "[Serving_SSB_Idx]"
+      - "[Call & 5G KPI PCell RF Serving SS-RSRP [dBm]]"
+    badge_template: "[{time}] 5G NR 빔 핑퐁 (PCI {pci}, {beam_chain}) ({dur_sec}초)"

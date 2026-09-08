@@ -425,7 +425,7 @@ class MasterTimelineParser:
         if not call_intervals and df_event is not None and not df_event.empty and 'TIME_STAMP' in df_event.columns:
             v_stat = self._find_col(df_event, ['Voice Call Service(per second)', 'Voice Call Service(Transition)'])
             if v_stat:
-                v_rows = df_event[df_event[v_stat].dropna().astype(str).str.contains('VoLTE|Voice', case=False, na=False)]
+                v_rows = df_event[df_event[v_stat].fillna('').astype(str).str.contains('VoLTE|Voice', case=False)]
                 if not v_rows.empty:
                     call_intervals.append({
                         'call_no': 'Call 1',

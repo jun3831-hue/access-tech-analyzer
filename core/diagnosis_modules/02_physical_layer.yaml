@@ -1,0 +1,57 @@
+domain: "02_physical_layer"
+domain_name: "5G 무선 물리계층 분석"
+
+rules:
+  - id: "DIAG_M_01_NR"
+    name: "고신호 구간 MIMO 랭크 저하"
+    phase: "DL"                     # Call_Summary의 DL 트래픽 구간에서만 판정
+    severity_default: "중간"
+    detection:
+      target_source: "QC_KPI, L3_MSG, SMART_PHONE"
+      condition: "Serving SS-SINR >= 13.0 dB and Layer_Num <= 2.2 for >= 3.0 seconds during DL traffic"
+    thresholds:
+      sinr_min_db: 13.0
+      layer_max: 2.2
+      duration_min_sec: 3.0
+    severity_levels:
+      MED: "초강전계(SINR >= 13.0 dB)에서 지속 시간 >= 3.0초 MIMO 2-Layer 제한"
+      LOW: "일시적(1.0s ~ 3.0s) 랭크 저하"
+    correlation_fields:
+      - "[Call & 5G KPI PCell RF Serving SS-SINR [dB]]"
+      - "[Call & 5G KPI PCell Layer1 DL Layer Num]"
+      - "[Call & 5G KPI PCell Layer1 RI4 Rate [%]]"
+      - "[Call & 5G KPI PCell RF Serving SS-RSRP [dBm]]"
+      - "[Battery Temperature]"
+    root_cause_templates:
+      l3_2port: "기지국 RRC 메시지의 CSI-RS 2포트(p2) 설정으로 인해 물리적 2-Layer로 고정 동작함"
+      ue_thermal: "단말 내부 고온 발열({battery_temp:.1f}℃)로 인한 2Rx 안테나 차단 추정"
+      ue_antenna_2rx: "단말 모뎀의 수신 안테나 2Rx 축소로 인한 2-Layer 동작 추정"
+      scheduler_cap: "단말의 4-Layer 수신 가능(RI4={avg_ri4:.1f}%) 보고 대비 기지국 스케줄러의 Rank 2 제한 추정"
+      gnb_2layer_fixed: "SINR {avg_sinr:.1f}dB 최상급 전계이나 해당 기지국(PCI {pci})의 2-Layer 고정 동작 추정"
+      general_restriction: "우수 전계이나 기지국 및 무선 채널 제약으로 인한 2-Layer 동작 추정"
+
+  - id: "DIAG_M_02_NR"
+    name: "5G PDSCH CRC 연속 에러"
+    phase: "DL"                     # Call_Summary의 DL 트래픽 구간에서만 판정
+    severity_default: "높음"
+    detection:
+      target_source: "QC_KPI, 320_BLER_MATRIX, MAC_PDSCH_PER_SLOT"
+      condition: "PDSCH BLER >= 15% and continuous CRC FAIL >= 100 slots"
+    thresholds:
+      bler_trigger_pct: 15.0         # 1단계 QC_KPI 발췌 기준 (BLER >= 15%)
+      consecutive_fail_min: 100      # 2단계 연속 CRC FAIL 슬롯 수 (100슬롯 / 약 70ms)
+      slot_bler_min_pct: 30.0        # 2단계 슬롯 BLER 기준
+      duration_min_sec: 1.0          # 최소 지속 시간
+      sinr_drop_threshold_db: 8.0    # SINR 급락(간섭) 판정 기준
+      high_sinr_threshold_db: 18.0   # 고신호 고MCS 판정 SINR 기준
+      high_mcs_threshold: 24         # 고신호 고MCS 판정 MCS 기준 (256QAM)
+    correlation_fields:
+      - "[Call & 5G KPI PCell Layer1 DL BLER [%]]"
+      - "[Call & 5G KPI PCell RF Serving SS-SINR [dB]]"
+      - "[Call & 5G KPI PCell Layer1 DL MCS (Avg)]"
+      - "[Call & 5G KPI PCell RF Serving SS-RSRP [dBm]]"
+    root_cause_templates:
+      sinr_plunge: "수신 SINR 저하(간섭/잡음 증가)로 인한 PDSCH 복조 실패 추정"
+      high_mcs_overload: "우수 전계이나 기지국이 채널 여유도 대비 과도하게 높은 MCS를 할당하여 복조 실패 추정"
+      phase_distortion: "수신 전계 대비 급격한 채널 위상 왜곡으로 인한 PDSCH 복조 실패 추정"
+      general_interference: "무선 채널 급변으로 인한 PDSCH 복조 실패 추정"

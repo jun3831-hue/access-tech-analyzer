@@ -1,0 +1,84 @@
+version: "2.0.0"
+module_id: "MOD_VENDOR_NOKIA"
+module_name: "노키아(NOKIA) 5G AirScale 특화 도메인 통합 진단 모듈"
+category: "VENDOR_NOKIA"
+targeting:
+  network_mode: ["ALL"]
+  active_vendor: ["NOKIA"]
+  call_phase: ["ALL", "DL_Traffic", "UL_Traffic"]
+
+rules:
+  - id: "DIAG_V_01"
+    name: "노키아 SRS 리소스 핑퐁 (Nokia SRS Resource Flapping)"
+    severity: "MEDIUM"
+    detection:
+      target_source: "L3_MSG, MAC_UL_PHY_CHA_SCHE"
+      condition: "srs-ResourceId switches rapidly >= 3 times within 2 seconds"
+      phase: "UL_Traffic"
+    analysis:
+      root_cause: "노키아 AirScale 스케줄러의 상향 SRS 빔 전환 헌팅으로 상향 변조율(UL MCS) 저하 유발"
+      correlation_fields:
+        - "[srs-ResourceId]"
+        - "[Call & 5G KPI PCell Layer1 UL MCS (Avg)]"
+        - "[Call & 5G KPI PCell Layer1 UL BLER [%]]"
+    improvement:
+      parameter: "srs-ResourceSet-Usage"
+      recommended_action: "SRS 빔포밍 가중치 필터 주기 연장 및 스위칭 임계치 완화"
+      vendor_specific:
+        nokia: "set SRS_RESOURCE_SET srsFilteringTimer=ms100"
+
+  - id: "DIAG_V_02"
+    name: "노키아 OLLA 페널티 과다 드롭 (Nokia OLLA Penalty Drop)"
+    severity: "HIGH"
+    detection:
+      target_source: "QC_KPI"
+      condition: "PDSCH BLER bursts then DL MCS drops > 8 steps and stays low for > 5 seconds"
+      phase: "DL_Traffic"
+    analysis:
+      root_cause: "노키아 링크 적응 알고리즘의 OLLA Step Down은 크고 Step Up 회복 속도가 느려 저속 고착"
+      correlation_fields:
+        - "[Call & 5G KPI PCell Layer1 DL MCS (Avg)]"
+        - "[Call & 5G KPI PCell Layer1 DL BLER [%]]"
+        - "[Call & 5G KPI PCell RF Serving SS-SINR [dB]]"
+    improvement:
+      parameter: "ollaStepUp, ollaStepDown"
+      recommended_action: "노키아 OLLA Step Down 페널티 축소 및 Step Up 가속 설정"
+      vendor_specific:
+        nokia: "set NR_OLLA ollaStepDown=0.5dB, ollaStepUp=0.1dB"
+
+  - id: "DIAG_V_03"
+    name: "노키아 3-Pool CSI-RS 및 Muting 충돌 (Nokia 3-Pool CSI-RS / Muting Conflict)"
+    severity: "HIGH"
+    detection:
+      target_source: "320_BLER_MATRIX, nokia_domain_rules.yaml"
+      condition: "Specific slot BLER > 25% matching Nokia Other Pool RS4 Muting Offsets (25, 65, 105)"
+      phase: "DL_Traffic"
+    analysis:
+      root_cause: "노키아 셀 고유 3-Pool CSI-RS 오프셋(Pool 0: 25,65,105 / Pool 1: 26,66,106 / Pool 2: 27,107)과 타 기지국 Muting 패턴 충돌"
+      correlation_fields:
+        - "[nzp-CSI-RS-ResourceId]"
+        - "[Call & 5G KPI PCell Layer1 DL BLER [%]]"
+        - "[Call & 5G KPI PCell RF Serving SS-SINR [dB]]"
+    improvement:
+      parameter: "nzp-CSI-RS-ResourceId, CSI-RS-Pool"
+      recommended_action: "nokia_domain_rules.yaml에 따라 인접 셀과 겹치지 않는 CSI-RS Pool ID로 재할당"
+      vendor_specific:
+        nokia: "set CSI_RS_CONFIG poolOffset=Pool1_NonOverlapping"
+
+  - id: "DIAG_V_04"
+    name: "노키아 SRS 주기-슬롯 정렬 불일치 (Nokia SRS sl40 Alignment Fail)"
+    severity: "MEDIUM"
+    detection:
+      target_source: "L3_MSG, MAC_UL_PHY_CHA_PC"
+      condition: "SRS sl40 periodicity offset (4, 14, 24) collides with Special Slot GP/Downlink symbol"
+      phase: "UL_Traffic"
+    analysis:
+      root_cause: "노키아 4-hop Subband SRS의 sl40 주기 슬롯이 TDD 스위치 포인트와 정렬되지 않아 SRS 미송신"
+      correlation_fields:
+        - "[periodicityAndOffset-p]"
+        - "[Call & 5G KPI PCell RF SRS Power [dBm]]"
+    improvement:
+      parameter: "srs-PeriodicityAndOffset"
+      recommended_action: "SRS 슬롯 오프셋을 상향 전용 슬롯(Slot 4, 9, 14, 19)으로 정렬"
+      vendor_specific:
+        nokia: "set SRS_CONFIG periodicityAndOffset=sl40:offset4"

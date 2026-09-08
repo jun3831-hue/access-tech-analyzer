@@ -1,0 +1,135 @@
+parsers:
+  # =========================================================================
+  # 1. L3 RRC Mobility & Measurement Event Parser (mobility_measurement_parser v3.6)
+  # =========================================================================
+  l3_rrc_mobility_parser:
+    name: "NR Mobility & Measurement Event 파서 (v3.6)"
+    intent: "단순 수신 전력 측정값을 넘어, 기지국이 단말에게 내린 A3/A5/B1 이벤트 설정 마진(Offset, Hysteresis, TTT)과 실제 보고된 RSRP를 1:1 결합하여 핸드오버 핑퐁, 고스트 셀, ANR 누락의 수치적 근거를 확보함"
+    theory: "Measurement Report의 RSRP와 RRC Reconfiguration의 임계값/오프셋을 단일 시계열 테이블로 조인해야만, 신호 세기 변화 대비 기지국의 판단 지연이나 파라미터 오설정을 0.1dB/ms 단위로 수학적 검증 가능함"
+    target_dataframe: "NR_Mobility_Meas_Table"
+    
+    strict_filtering:
+      description: "노이즈 및 단순 수신보고 메시지 필터링 및 실제 핸드오버 완료 메시지 추출 정책"
+      allow_only: ["RRC_RECONFIG_COMPLETE"]
+      drop_condition: "단순 L1 수신 보고(measurementReport) 행은 거르고, 실제 핸드오버가 수행 완료된 RRC_RECONFIG_COMPLETE 행을 기반으로 모빌리티 궤적 수치화"
+      
+    field_extractions:
+      s_pci_and_arfcn:
+        name: "서빙 셀 PCI 및 ARFCN"
+        intent: "현재 단말이 커넥티드 상태로 매달려 있는 서빙 셀의 물리 ID 및 주파수 대역 식별"
+        regex: 'Pci(\d+)@(?:Earfcn|NrArfcn)(\d+)'
+        captured_groups: ["s_pci", "s_arfcn"]
+        
+      measId:
+        name: "Measurement ID"
+        intent: "측정 보고(Report)와 기지국 설정(Config) 간의 1:1 관계를 맺어주는 만고불변 조인 키"
+        regex: 'measId\s*=\s*(\d+)'
+        captured_groups: ["measId"]
+
+      event_margins:
+        name: "A3/A5/B1/B2 이벤트 임계값 및 오프셋 마진"
+        intent: "핸드오버 마진 파라미터를 캐싱하여, 핑퐁 핸드오버 발생 시 기지국의 오설정 여부를 검증"
+        regex_patterns:
+          Event: 'eventId.*?event([A-B]\d)'
+          Threshold1: '(?:a\d-Threshold|a5-Threshold1)\s*\{.*?=\s*(-?\d+)'
+          Threshold2: 'a5-Threshold2\s*\{.*?=\s*(-?\d+)'
+          Offset: 'event[a-b]\d-Offset\s*(?:\{.*?ms\d+\s*=\s*(-?\d+)|=\s*(-?\d+))'
+          Hysteresis: 'hysteresis\s*=\s*(\d+)'
+          TTT: 'timeToTrigger\s*=\s*(\w+)'
+          Target_PCI: 'reconfigurationWithSync\s*\{.*?physCellId\s*=\s*(\d+)'
+
+
+  # =========================================================================
+  # 2. NR DL Reference Signal (CSI-RS & TRS & ZP) Parser (dl_rs_parser v2.1)
+  # =========================================================================
+  dl_rs_parser:
+    name: "NR DL Reference Signal Universal 파서 (v2.1)"
+    intent: "CSI-RS, TRS, ZP-CSI-RS, ZP-TRS, CSI-IM Resource 및 Resource Set 구조와 ADD_MOD/RELEASE 동작 상태를 파싱하여 시간대별, 서빙 PCI별 하향링크 참조신호 배치를 시계열로 제공"
+    theory: "CSI-RS/TRS Resource 및 Resource Set 단위 파싱을 수행하여 Ports, Symbol, Period, Offset, Starting_RB, Nrof_RBs, Freq_Domain_Alloc 물리 파라미터를 추출하고 2단계 도메인 인터프리팅 엔진과 결합함"
+    target_dataframe: "NR_DL_RS_Table"
+
+    field_extractions:
+      action_and_level:
+        name: "동작 상태 및 계층 식별"
+        captured_groups: ["Action", "Target_Level"]
+      time_and_pci:
+        name: "시간대 및 서빙 PCI 식별"
+        captured_groups: ["TIME_STAMP", "Serving_PCI"]
+      resource_id:
+        name: "CSI-RS / TRS / ZP / CSI-IM Resource ID 및 Set ID"
+        regex: '(?:nzp|zp|csi_IM)_CSI_RS_ResourceId\s*=\s*(\d+)'
+      nrof_ports:
+        name: "CSI-RS Port 개수"
+        regex: 'nrofPorts\s*=\s*(\w+)'
+      periodicity_and_offset:
+        name: "주기 및 오프셋 (Period & Slot Offset)"
+        regex: 'periodicityAndOffset\s*\{.*?(slots\d+)\s*=\s*(\d+)'
+      rb_range:
+        name: "Starting RB 및 Nrof RBs"
+        regex: 'startingRB\s*=\s*(\d+).*?nrofRBs\s*=\s*(\d+)'
+
+
+  # =========================================================================
+  # 3. NR UL Reference Signal (SRS) Universal Fact Parser (ul_rs_parser v3.0)
+  # =========================================================================
+  ul_rs_parser:
+    name: "NR UL Reference Signal & SRS Universal Fact 파서 (v3.0)"
+    intent: "도메인 해석 전 pure 3GPP ASN.1 원문 팩트(14개 컬럼)를 조인하여 상향링크 참조신호 설정 상태를 시계열로 수집"
+    theory: "Wideband SRS(b_SRS=0) 및 Subband SRS(b_SRS!=0)의 시간-주파수 2D 자원 점유 팩트를 14개 순수 컬럼으로 추출하여 2단계 도메인 인터프리팅 엔진으로 전달"
+    target_dataframe: "NR_UL_RS_Table"
+
+    field_extractions:
+      action_and_pci:
+        name: "시간대, 서빙 PCI 및 수명주기 동작 식별"
+        captured_groups: ["TIME_STAMP", "Serving_PCI", "Action"]
+      srs_identity:
+        name: "SRS Resource ID 및 Set ID"
+        captured_groups: ["SRS_Resource_ID", "SRS_Set_ID"]
+      physical_mapping:
+        name: "안테나 포트, 용도, 심볼 위치, 대역폭 및 Comb/Shift"
+        captured_groups: ["nrofSRS_Ports", "usage", "startPosition", "nrofSymbols", "c_SRS", "b_SRS", "Periodicity_Offset", "freqDomainPosition", "comb_cyclicShift"]
+
+
+  # =========================================================================
+  # 4. Universal NR SIB & PRB Allocation Parser (sib_resource_parser)
+  # =========================================================================
+  sib_resource_parser:
+    name: "Universal 5G NR SIB1 & SI-RNTI PRB Allocation 파서"
+    intent: "시간대별, 서빙 PCI별 5G NR-SIB1 방송 전송 주기와 점유 PRB 위치를 정밀 추적하여, LTE SIB2 격리 및 PDSCH 데이터 영역과의 물리적 자원 충돌 원인을 확진함"
+    theory: "5G NR-SIB1 및 NR-SI 방송 정보는 SI-RNTI(0xFFFF)를 사용하며, TIME_STAMP 및 Serving_PCI 별 시계열로 조인하여 320 슬롯 매트릭스 오프셋 상에서 충돌 지점을 확진함"
+    target_dataframe: "NR_SIB_Config_Table"
+    
+    extracted_fields:
+      time_and_pci:
+        name: "시간대 및 서빙 PCI 식별"
+        captured_groups: ["TIME_STAMP", "Serving_PCI"]
+      si_periodicity:
+        name: "NR SIB1 전송 주기 및 매트릭스 치환"
+        intent: "320-Slot 매트릭스 모듈로 연산(% 320)의 기준점이 되는 슬롯 주기 치환"
+        regex: 'si_Periodicity\s*=\s*(rf\d+)'
+        slot_conversion:
+          rf16: 160   # 16 Radio Frames * 10 Slots = 160 Slots (5G NR-SIB1 전송 기준)
+          rf32: 320   # NR-SI 전송 기준
+      si_rnti_allocation:
+        name: "SI-RNTI 점유 PRB 및 RAT 디코딩"
+        intent: "SI-RNTI(0xFFFF) PDSCH 자원이 실제 점유한 주파수 PRB 범위와 320 슬롯 위치를 조인"
+        rnti_filter: "0xFFFF"
+        rat_decoding_reference: "RAT0 (Bitmap RBG Size 디코딩) 및 RAT1 (RIV 수식 역산) 적용하여 Start_PRB 및 Num_RBs 도출"
+
+
+  # =========================================================================
+  # 5. Universal MAC/PHY Slot Matrix & 320-Slot Allocation Parser (mac_phy_320_slot_parser)
+  # =========================================================================
+  mac_phy_320_slot_parser:
+    name: "Universal MAC/PHY 320-Slot Matrix & Resource Allocation 파서"
+    intent: "L1/L2 MAC Throughput, MCS, RB 개수, BLER 및 Slot % 320 매트릭스 인덱스를 추출하여 하향링크 전송 성능 및 주기적 충돌 진단에 활용"
+    theory: "MAC/PHY 층의 데이터 처리량과 슬롯 단위 자원 점유율을 320-Slot 모듈로 오프셋 상에 매핑하여 PDSCH/PUSCH 스케줄링 억압 지점을 확진함"
+    target_dataframe: "Full_MAC_PHY_320_Slot_Table"
+
+    field_extractions:
+      time_and_pci:
+        name: "시간대, 서빙 PCI 및 절대 슬롯 인덱스"
+        captured_groups: ["TIME_STAMP", "Serving_PCI", "Abs_Slot_Index"]
+      kpi_metrics:
+        name: "MAC Tput, MCS, RB 개수 및 Modulation"
+        captured_groups: ["MAC_Tput", "MCS", "RB_Num", "BLER", "Modulation"]

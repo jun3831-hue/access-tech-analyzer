@@ -1,0 +1,73 @@
+version: "2.0.0"
+module_id: "MOD_DEVICE_ENVIRONMENT"
+module_name: "단말 상태 및 음영 환경 격리 통합 진단 모듈"
+category: "DEVICE_ENVIRONMENT"
+targeting:
+  network_mode: ["ALL"]
+  active_vendor: ["ALL"]
+  call_phase: ["ALL", "DL_Traffic", "UL_Traffic"]
+
+rules:
+  - id: "DIAG_DEV_01"
+    name: "단말 발열 스로틀링 진단 (Device Thermal Throttling)"
+    severity: "HIGH"
+    detection:
+      target_source: "SMART_PHONE, QC_KPI, MAC_PDSCH_PER_SLOT"
+      condition: "Battery Temperature >= 43.0 C and Layer_Num drops from 4 to 2 under high SINR"
+      phase: "DL_Traffic, UL_Traffic"
+    analysis:
+      root_cause: "무선망 결함이 아니라 단말 AP/모뎀 자체의 과열 보호 동작(Thermal Throttling)으로 인한 MIMO 안테나 축소 또는 송신 전력 제한 발생"
+      correlation_fields:
+        - "[Battery Temperature]"
+        - "[Call & 5G KPI PCell Layer1 DL Layer Num]"
+        - "[Call & 5G KPI PCell RF Serving SS-SINR [dB]]"
+        - "[Call & 5G KPI PCell RF PUSCH Power [dBm]]"
+    improvement:
+      parameter: "Device-Thermal-Policy"
+      recommended_action: "단말 냉각 상태 확보 후 재측정 권고 (망 파라미터 결함 아님으로 자동 분류)"
+      vendor_specific:
+        nokia: "N/A (Device Issue)"
+        samsung: "N/A (Device Issue)"
+        ericsson: "N/A (Device Issue)"
+
+  - id: "DIAG_DEV_02"
+    name: "인빌딩 및 지하 터널 GPS 차폐 환경 격리 (Inbuilding GPS Loss Isolation)"
+    severity: "MEDIUM"
+    detection:
+      target_source: "EVENT, SMART_PHONE, QC_KPI"
+      condition: "Inbuilding Point tag exists and GPS Provider becomes None"
+      phase: "ALL"
+    analysis:
+      root_cause: "실내/지하철/터널 진입으로 인한 물리적 전파 차폐 및 GPS 수신 불가 환경으로, 실외 기지국 품질 불량과 자동 분리"
+      correlation_fields:
+        - "[Static Inbuilding Point]"
+        - "[GPS Provider]"
+        - "[Call & 5G KPI PCell RF Serving SS-RSRP [dBm]]"
+    improvement:
+      parameter: "Inbuilding-DAS-Coverage"
+      recommended_action: "인빌딩 중계기(DAS) 증설 또는 실내 소형셀(Small Cell) 신설 검토"
+      vendor_specific:
+        nokia: "check Inbuilding DAS coupling ratio"
+        samsung: "check Inbuilding DAS coupling ratio"
+        ericsson: "check Inbuilding DAS coupling ratio"
+
+  - id: "DIAG_DEV_03"
+    name: "Multi-TCP 다중 세션 대역폭 지연 (Multi-TCP Session Latency Bottleneck)"
+    severity: "MEDIUM"
+    detection:
+      target_source: "QC_KPI"
+      condition: "DownSessionCount >= 16 but DL Throughput < 800 Mbps under Layer 4 and MCS 24"
+      phase: "DL_Traffic"
+    analysis:
+      root_cause: "무선 물리계층(MIMO 4Layer, 256QAM)은 정상이나, 단말 소켓 계층에서 특정 TCP 세션의 윈도우 정체 및 지연 발생"
+      correlation_fields:
+        - "[DownSessionCount]"
+        - "[Call & SKT Speed Test Call Info Download Event Info DL Throughput Result]"
+        - "[Call & 5G KPI Total Info Layer2 MAC DL Throughput [Mbps]]"
+    improvement:
+      parameter: "tcp-Initial-Congestion-Window"
+      recommended_action: "측정 서버/단말 간 TCP InitCwnd 확장 및 Multi-Socket 버퍼링 점검"
+      vendor_specific:
+        nokia: "check Core TCP window profile"
+        samsung: "check Core TCP window profile"
+        ericsson: "check Core TCP window profile"

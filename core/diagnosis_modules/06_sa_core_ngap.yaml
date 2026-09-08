@@ -1,0 +1,51 @@
+version: "2.0.0"
+module_id: "MOD_SA_CORE_NGAP"
+module_name: "5G SA 코어망 및 NGAP 연동 통합 진단 모듈"
+category: "SA_CORE_NGAP"
+targeting:
+  network_mode: ["5G_SA"]
+  active_vendor: ["ALL"]
+  call_phase: ["ALL"]
+
+rules:
+  - id: "DIAG_SA_01"
+    name: "NGAP PDU Session Setup Failure"
+    severity: "HIGH"
+    detection:
+      target_source: "L3_MSG"
+      condition: "PDU Session Resource Setup Failure or Reject in 5GC NAS/NGAP"
+      phase: "ALL"
+    analysis:
+      root_cause: "5GC SMF/UPF 세션 생성 거절, QoS Flow 매핑 실패 또는 슬라이스(NSSAI) 권한 오류"
+      correlation_fields:
+        - "[NGAP Cause]"
+        - "[PDU Session ID]"
+        - "[5G-S-TMSI]"
+    improvement:
+      parameter: "5GC-SMF-SessionPolicy"
+      recommended_action: "5GC 코어 SMF PDU 세션 프로파일 및 NSSAI 슬라이스 가입 정보 점검"
+      vendor_specific:
+        nokia: "check 5GC_SMF sessionProfile, dnnPolicy"
+        samsung: "MOD 5GC_SMF: DnnPolicy=ALLOW"
+        ericsson: "set SmfPduSessionProfile allowAll=true"
+
+  - id: "DIAG_SA_02"
+    name: "BWP 스위칭 타임아웃 (BWP Switching Inactivity Timeout)"
+    severity: "MEDIUM"
+    detection:
+      target_source: "L3_MSG, QC_KPI"
+      condition: "bwp-InactivityTimer expires and Active BWP drops to Default BWP (20MHz)"
+      phase: "DL_Traffic"
+    analysis:
+      root_cause: "단말 트래픽 단절로 기지국이 전력 절감을 위해 100MHz 대역폭(BWP)에서 20MHz로 강제 축소"
+      correlation_fields:
+        - "[Active BWP ID]"
+        - "[Call & 5G KPI PCell Layer1 DL RB Num (Avg)]"
+        - "[bwp-InactivityTimer]"
+    improvement:
+      parameter: "bwp-InactivityTimer"
+      recommended_action: "bwp-InactivityTimer 연장 (ms10 -> ms40)"
+      vendor_specific:
+        nokia: "set BWP_CFG bwpInactivityTimer=ms40"
+        samsung: "MOD NRBWP: InactivityTimer=40"
+        ericsson: "set BwpConfig inactivityTimer=40ms"

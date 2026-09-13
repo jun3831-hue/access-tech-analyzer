@@ -44,7 +44,7 @@ except ImportError:
 # Streamlit Page Configuration
 # =============================================================================
 st.set_page_config(
-    page_title="DM AI Web Analyzer",
+    page_title="DM Analyzer v0.1",
     page_icon="📡",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -114,6 +114,80 @@ DEFAULT_SFTP_CONFIG = {
     "pass": "setup2",
     "remote_dir": "/Personal/전광용/DM Agent/sessions"
 }
+
+if HAS_PARAMIKO:
+    try:
+        import paramiko.util
+        _orig_paramiko_u = paramiko.util.u
+        def _safe_paramiko_u(s, encoding="utf8"):
+            if isinstance(s, bytes):
+                try:
+                    return s.decode("utf-8")
+                except UnicodeDecodeError:
+                    try:
+                        return s.decode("cp949")
+                    except UnicodeDecodeError:
+                        return s.decode("latin1", errors="replace")
+            return _orig_paramiko_u(s, encoding)
+        paramiko.util.u = _safe_paramiko_u
+        if hasattr(paramiko, "message"):
+            paramiko.message.u = _safe_paramiko_u
+    except Exception:
+        pass
+
+
+def discover_sftp_sessions(sftp, base_dir: str, max_depth: int = 3) -> dict:
+    """
+    Recursively scans SFTP directories up to max_depth to find folders containing
+    _Map.html or _Master.xlsx artifacts.
+    Returns: { "세션명 (날짜 / 사번)": { "remote_dir": path, "session_name": name, "files": [file_names...] } }
+    """
+    import stat
+    found = {}
+
+    def _walk(curr_path: str, depth: int):
+        if depth > max_depth:
+            return
+        try:
+            items = sftp.listdir_attr(curr_path)
+        except Exception:
+            return
+
+        subdirs = []
+        session_files = []
+        for it in items:
+            if stat.S_ISDIR(it.st_mode):
+                subdirs.append(it.filename)
+            else:
+                fn_lower = it.filename.lower()
+                if fn_lower.endswith('.html') or fn_lower.endswith('.xlsx') or fn_lower.endswith('.txt') or fn_lower.endswith('.json'):
+                    session_files.append(it.filename)
+
+        has_map = any(f.lower().endswith('.html') for f in session_files)
+        has_master = any(f.lower().endswith('.xlsx') for f in session_files)
+
+        if has_map or has_master:
+            sess_name = os.path.basename(curr_path.rstrip('/'))
+            rel_parts = curr_path.replace(base_dir, '').strip('/').split('/')
+            if len(rel_parts) >= 3:
+                label = f"{rel_parts[-1]} ({rel_parts[-2]} / {rel_parts[-3]})"
+            elif len(rel_parts) >= 2:
+                label = f"{rel_parts[-1]} ({rel_parts[-2]})"
+            else:
+                label = sess_name
+
+            found[label] = {
+                "remote_dir": curr_path,
+                "session_name": sess_name,
+                "files": session_files
+            }
+
+        for d in subdirs:
+            next_p = f"{curr_path.rstrip('/')}/{d}"
+            _walk(next_p, depth + 1)
+
+    _walk(base_dir, 0)
+    return found
 
 
 def discover_local_sessions():
@@ -262,13 +336,9 @@ def extract_embedded_data_from_map(html_str: str):
 # Sidebar: Session Selection & Ingestion
 # =============================================================================
 with st.sidebar:
-    st.markdown("### 📡 DM AI Web Analyzer")
-    st.caption("초경량 세션 직결 대시보드 v1.0")
+    st.markdown("### 📡 DM Analyzer v0.1")
 
     data_source = st.radio("데이터 소스", ["📤 파일 직접 업로드", "🌐 원격 SFTP 서버"], index=0)
-
-    selected_session_path = None
-    selected_session_name = None
 
     if data_source == "📤 파일 직접 업로드":
         st.markdown("**세션 산출물 업로드 (ZIP 또는 개별 파일)**")
@@ -295,8 +365,8 @@ with st.sidebar:
                     f_save.write(uploaded_file.getbuffer())
                 st.success(f"'{fname}' 파일 저장 완료!")
 
-            selected_session_path = target_sess_dir
-            selected_session_name = base_sname
+            st.session_state["active_session_path"] = target_sess_dir
+            st.session_state["active_session_name"] = base_sname
 
     else:
         st.markdown("**SFTP 접속 설정**")
@@ -306,20 +376,59 @@ with st.sidebar:
         sftp_pass = st.text_input("비밀번호", value=DEFAULT_SFTP_CONFIG["pass"], type="password")
         sftp_base = st.text_input("원격 경로", value=DEFAULT_SFTP_CONFIG["remote_dir"])
 
-        if st.button("🔄 원격 세션 목록 조회", use_container_width=True):
+        if st.button("🔄 원격 세션 목록 조회", use_container_width=True, type="secondary"):
             if not HAS_PARAMIKO:
                 st.error("paramiko 모듈이 설치되어 있지 않습니다.")
             else:
-                try:
-                    t = paramiko.Transport((sftp_host, int(sftp_port)))
-                    t.connect(username=sftp_user, password=sftp_pass)
-                    sftp = paramiko.SFTPClient.from_transport(t)
-                    remote_items = sftp.listdir(sftp_base)
-                    st.success(f"원격 항목 {len(remote_items)}개 발견됨")
-                    sftp.close()
-                    t.close()
-                except Exception as ex:
-                    st.error(f"SFTP 접속 실패: {ex}")
+                with st.spinner("원격 SFTP 세션 탐색 중..."):
+                    try:
+                        t = paramiko.Transport((sftp_host, int(sftp_port)))
+                        t.connect(username=sftp_user, password=sftp_pass)
+                        sftp = paramiko.SFTPClient.from_transport(t)
+                        discovered = discover_sftp_sessions(sftp, sftp_base)
+                        st.session_state["sftp_discovered_sessions"] = discovered
+                        sftp.close()
+                        t.close()
+
+                        if discovered:
+                            st.success(f"원격 세션 {len(discovered)}개 발견됨")
+                        else:
+                            st.warning("지정된 원격 경로에서 세션을 찾을 수 없습니다.")
+                    except Exception as ex:
+                        st.error(f"SFTP 접속 실패: {ex}")
+
+        sftp_sessions = st.session_state.get("sftp_discovered_sessions", {})
+        if sftp_sessions:
+            st.markdown("---")
+            st.markdown("**원격 세션 선택**")
+            sess_labels = list(sftp_sessions.keys())
+            selected_remote_key = st.selectbox("불러올 원격 세션", sess_labels, index=0)
+            target_info = sftp_sessions[selected_remote_key]
+
+            if st.button("📥 세션 불러오기 (동기화)", use_container_width=True, type="primary"):
+                with st.spinner(f"'{target_info['session_name']}' 산출물 다운로드 중..."):
+                    try:
+                        t = paramiko.Transport((sftp_host, int(sftp_port)))
+                        t.connect(username=sftp_user, password=sftp_pass)
+                        sftp = paramiko.SFTPClient.from_transport(t)
+
+                        local_sess_dir = os.path.join(LOCAL_SESSIONS_DIR, target_info["session_name"])
+                        os.makedirs(local_sess_dir, exist_ok=True)
+
+                        for fn in target_info["files"]:
+                            rem_fp = f"{target_info['remote_dir'].rstrip('/')}/{fn}"
+                            loc_fp = os.path.join(local_sess_dir, fn)
+                            sftp.get(rem_fp, loc_fp)
+
+                        sftp.close()
+                        t.close()
+
+                        st.session_state["active_session_path"] = local_sess_dir
+                        st.session_state["active_session_name"] = target_info["session_name"]
+                        st.success(f"'{target_info['session_name']}' 동기화 완료!")
+                        st.rerun()
+                    except Exception as ex:
+                        st.error(f"다운로드 실패: {ex}")
 
     st.markdown("---")
     if st.button("🔄 화면 새로고침", use_container_width=True):
@@ -329,8 +438,11 @@ with st.sidebar:
 # =============================================================================
 # Main Content View
 # =============================================================================
-if not selected_session_path:
-    st.info("👈 좌측 사이드바에서 분석할 세션을 선택하거나 산출물 파일을 업로드해 주세요.")
+selected_session_path = st.session_state.get("active_session_path")
+selected_session_name = st.session_state.get("active_session_name")
+
+if not selected_session_path or not os.path.exists(selected_session_path):
+    st.info("👈 좌측 사이드바에서 원격 세션을 조회하여 불러오거나, 산출물 파일(ZIP/HTML/XLSX)을 직접 업로드해 주세요.")
     st.stop()
 
 # Load Artifacts

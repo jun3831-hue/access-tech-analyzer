@@ -77,8 +77,7 @@ st.markdown("""
 
     /* Sidebar width & compact button styling */
     section[data-testid="stSidebar"] {
-        min-width: 380px !important;
-        width: 380px !important;
+        width: 300px;
     }
     section[data-testid="stSidebar"] button {
         min-height: 28px !important;
@@ -262,7 +261,7 @@ def show_sftp_session_dialog():
     # 4-Column Search Filters
     col_f1, col_f2, col_f3, col_f4 = st.columns(4)
     with col_f1:
-        f_user = st.text_input("🔍 등록자 검색", key="dlg_filter_user", placeholder="예: 전광용")
+        f_user = st.text_input("🔍 등록자 검색", key="dlg_filter_user", placeholder="예: skt1110018")
     with col_f2:
         f_up_date = st.text_input("🔍 업로드일", key="dlg_filter_up_date", placeholder="예: 2026-09-14")
     with col_f3:

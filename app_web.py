@@ -50,31 +50,49 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for Premium Theme
+# Custom CSS for Premium Full-Width Theme with Safe Margins
 st.markdown("""
 <style>
+    /* Hide Streamlit default Deploy button, menu, footer */
+    .stDeployButton { display: none !important; }
+    #MainMenu { display: none !important; }
+    footer { display: none !important; }
+
+    /* Safe container padding - 3.2rem top margin to clear Streamlit header without overlap */
     .main .block-container {
-        padding-top: 1.2rem;
-        padding-bottom: 2rem;
-        padding-left: 2rem;
-        padding-right: 2rem;
-        max-width: 100%;
+        padding-top: 3.2rem !important;
+        padding-bottom: 0.5rem !important;
+        padding-left: 0.5rem !important;
+        padding-right: 0.5rem !important;
+        max-width: 100% !important;
     }
+
+    /* Tabs styling - compact and crisp */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
+        gap: 6px;
+        margin-bottom: 6px;
     }
     .stTabs [data-baseweb="tab"] {
-        padding: 8px 18px;
+        padding: 6px 16px;
         font-weight: 700;
-        font-size: 14px;
+        font-size: 13px;
         border-radius: 6px;
     }
+
+    /* Full-display Map iframe styling */
+    iframe {
+        width: 100% !important;
+        height: calc(100vh - 165px) !important;
+        border: none !important;
+        border-radius: 6px;
+    }
+
     .metric-card {
         background-color: #1e293b;
         border: 1px solid #334155;
         border-radius: 8px;
-        padding: 12px 16px;
-        margin-bottom: 10px;
+        padding: 10px 14px;
+        margin-bottom: 8px;
     }
     .badge-blue {
         background: #2563eb;
@@ -91,6 +109,11 @@ st.markdown("""
         border-radius: 12px;
         font-size: 11px;
         font-weight: bold;
+    }
+
+    /* Sidebar styling */
+    section[data-testid="stSidebar"] button {
+        border-radius: 6px !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -332,103 +355,177 @@ def extract_embedded_data_from_map(html_str: str):
     return extracted
 
 
+# Initialize loaded sessions in session_state if not present
+if "loaded_sessions" not in st.session_state:
+    st.session_state["loaded_sessions"] = {}
+    if os.path.exists(LOCAL_SESSIONS_DIR):
+        for item in sorted(os.listdir(LOCAL_SESSIONS_DIR)):
+            sp = os.path.join(LOCAL_SESSIONS_DIR, item)
+            if os.path.isdir(sp):
+                files = os.listdir(sp)
+                if any(f.endswith('.html') or f.endswith('.xlsx') for f in files):
+                    st.session_state["loaded_sessions"][item] = sp
+    if os.path.exists(DM_OUTPUT_DIR):
+        for d_dir in sorted(os.listdir(DM_OUTPUT_DIR), reverse=True):
+            dp = os.path.join(DM_OUTPUT_DIR, d_dir)
+            if os.path.isdir(dp):
+                for s_dir in sorted(os.listdir(dp)):
+                    sp = os.path.join(dp, s_dir)
+                    if os.path.isdir(sp):
+                        files = os.listdir(sp)
+                        if any(f.endswith('.html') or f.endswith('.xlsx') for f in files):
+                            st.session_state["loaded_sessions"][s_dir] = sp
+
 # =============================================================================
-# Sidebar: Session Selection & Ingestion
+# Sidebar: Direct SFTP Sync & Session File Downloader
 # =============================================================================
 with st.sidebar:
     st.markdown("### 📡 DM Analyzer v0.1")
 
-    data_source = st.radio("데이터 소스", ["📤 파일 직접 업로드", "🌐 원격 SFTP 서버"], index=0)
-
-    if data_source == "📤 파일 직접 업로드":
-        st.markdown("**세션 산출물 업로드 (ZIP 또는 개별 파일)**")
-        uploaded_file = st.file_uploader("세션 ZIP 파일 업로드", type=["zip", "html", "xlsx"])
-        if uploaded_file is not None:
-            fname = uploaded_file.name
-            base_sname = os.path.splitext(fname)[0].replace("_Map", "").replace("_Master", "")
-            target_sess_dir = os.path.join(LOCAL_SESSIONS_DIR, base_sname)
-            os.makedirs(target_sess_dir, exist_ok=True)
-
-            if fname.lower().endswith('.zip'):
-                zip_path = os.path.join(target_sess_dir, fname)
-                with open(zip_path, "wb") as fz:
-                    fz.write(uploaded_file.getbuffer())
+    # 1. Single Primary Button: Query Remote FTP Sessions
+    if st.button("🔄 FTP 세션 목록 조회", use_container_width=True, type="primary"):
+        if not HAS_PARAMIKO:
+            st.error("paramiko 모듈이 설치되어 있지 않습니다.")
+        else:
+            with st.spinner("원격 SFTP 서버 세션 탐색 중..."):
                 try:
-                    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                        zip_ref.extractall(target_sess_dir)
-                    st.success(f"'{fname}' 압축 해제 완료!")
+                    t = paramiko.Transport((DEFAULT_SFTP_CONFIG["host"], int(DEFAULT_SFTP_CONFIG["port"])))
+                    t.connect(username=DEFAULT_SFTP_CONFIG["user"], password=DEFAULT_SFTP_CONFIG["pass"])
+                    sftp = paramiko.SFTPClient.from_transport(t)
+                    discovered = discover_sftp_sessions(sftp, DEFAULT_SFTP_CONFIG["remote_dir"])
+                    st.session_state["sftp_discovered_sessions"] = discovered
+                    sftp.close()
+                    t.close()
+
+                    if discovered:
+                        st.success(f"원격 세션 {len(discovered)}개 발견됨")
+                    else:
+                        st.warning("원격 경로에서 세션을 찾을 수 없습니다.")
                 except Exception as ex:
-                    st.error(f"ZIP 해제 오류: {ex}")
-            else:
-                saved_path = os.path.join(target_sess_dir, fname)
-                with open(saved_path, "wb") as f_save:
-                    f_save.write(uploaded_file.getbuffer())
-                st.success(f"'{fname}' 파일 저장 완료!")
+                    st.error(f"SFTP 접속 실패: {ex}")
 
-            st.session_state["active_session_path"] = target_sess_dir
-            st.session_state["active_session_name"] = base_sname
+    # 2. Remote Session Discovery & Multiselect Download
+    sftp_sessions = st.session_state.get("sftp_discovered_sessions", {})
+    if sftp_sessions:
+        st.markdown("---")
+        st.markdown("##### 🌐 원격 세션 동기화")
+        sess_labels = list(sftp_sessions.keys())
+        selected_remote_keys = st.multiselect(
+            "다운로드할 세션 선택",
+            sess_labels,
+            default=[sess_labels[0]] if sess_labels else [],
+            help="1개 또는 여러 개의 세션을 선택하여 한 번에 로컬로 불러올 수 있습니다."
+        )
 
-    else:
-        st.markdown("**SFTP 접속 설정**")
-        sftp_host = st.text_input("서버 IP", value=DEFAULT_SFTP_CONFIG["host"])
-        sftp_port = st.number_input("포트", value=DEFAULT_SFTP_CONFIG["port"], step=1)
-        sftp_user = st.text_input("계정 ID", value=DEFAULT_SFTP_CONFIG["user"])
-        sftp_pass = st.text_input("비밀번호", value=DEFAULT_SFTP_CONFIG["pass"], type="password")
-        sftp_base = st.text_input("원격 경로", value=DEFAULT_SFTP_CONFIG["remote_dir"])
-
-        if st.button("🔄 원격 세션 목록 조회", use_container_width=True, type="secondary"):
-            if not HAS_PARAMIKO:
-                st.error("paramiko 모듈이 설치되어 있지 않습니다.")
-            else:
-                with st.spinner("원격 SFTP 세션 탐색 중..."):
+        if selected_remote_keys:
+            if st.button(f"📥 선택 세션 불러오기 ({len(selected_remote_keys)}개)", use_container_width=True):
+                with st.spinner(f"선택한 {len(selected_remote_keys)}개 세션 다운로드 중..."):
                     try:
-                        t = paramiko.Transport((sftp_host, int(sftp_port)))
-                        t.connect(username=sftp_user, password=sftp_pass)
-                        sftp = paramiko.SFTPClient.from_transport(t)
-                        discovered = discover_sftp_sessions(sftp, sftp_base)
-                        st.session_state["sftp_discovered_sessions"] = discovered
-                        sftp.close()
-                        t.close()
-
-                        if discovered:
-                            st.success(f"원격 세션 {len(discovered)}개 발견됨")
-                        else:
-                            st.warning("지정된 원격 경로에서 세션을 찾을 수 없습니다.")
-                    except Exception as ex:
-                        st.error(f"SFTP 접속 실패: {ex}")
-
-        sftp_sessions = st.session_state.get("sftp_discovered_sessions", {})
-        if sftp_sessions:
-            st.markdown("---")
-            st.markdown("**원격 세션 선택**")
-            sess_labels = list(sftp_sessions.keys())
-            selected_remote_key = st.selectbox("불러올 원격 세션", sess_labels, index=0)
-            target_info = sftp_sessions[selected_remote_key]
-
-            if st.button("📥 세션 불러오기 (동기화)", use_container_width=True, type="primary"):
-                with st.spinner(f"'{target_info['session_name']}' 산출물 다운로드 중..."):
-                    try:
-                        t = paramiko.Transport((sftp_host, int(sftp_port)))
-                        t.connect(username=sftp_user, password=sftp_pass)
+                        t = paramiko.Transport((DEFAULT_SFTP_CONFIG["host"], int(DEFAULT_SFTP_CONFIG["port"])))
+                        t.connect(username=DEFAULT_SFTP_CONFIG["user"], password=DEFAULT_SFTP_CONFIG["pass"])
                         sftp = paramiko.SFTPClient.from_transport(t)
 
-                        local_sess_dir = os.path.join(LOCAL_SESSIONS_DIR, target_info["session_name"])
-                        os.makedirs(local_sess_dir, exist_ok=True)
+                        last_synced_name = None
+                        for r_key in selected_remote_keys:
+                            target_info = sftp_sessions[r_key]
+                            s_name = target_info["session_name"]
+                            local_sess_dir = os.path.join(LOCAL_SESSIONS_DIR, s_name)
+                            os.makedirs(local_sess_dir, exist_ok=True)
 
-                        for fn in target_info["files"]:
-                            rem_fp = f"{target_info['remote_dir'].rstrip('/')}/{fn}"
-                            loc_fp = os.path.join(local_sess_dir, fn)
-                            sftp.get(rem_fp, loc_fp)
+                            for fn in target_info["files"]:
+                                rem_fp = f"{target_info['remote_dir'].rstrip('/')}/{fn}"
+                                loc_fp = os.path.join(local_sess_dir, fn)
+                                sftp.get(rem_fp, loc_fp)
+
+                            st.session_state["loaded_sessions"][s_name] = local_sess_dir
+                            last_synced_name = s_name
 
                         sftp.close()
                         t.close()
 
-                        st.session_state["active_session_path"] = local_sess_dir
-                        st.session_state["active_session_name"] = target_info["session_name"]
-                        st.success(f"'{target_info['session_name']}' 동기화 완료!")
+                        if last_synced_name:
+                            st.session_state["selected_session_key"] = last_synced_name
+                        st.success(f"{len(selected_remote_keys)}개 세션 동기화 완료!")
                         st.rerun()
                     except Exception as ex:
                         st.error(f"다운로드 실패: {ex}")
+
+    # 3. Loaded Sessions (Sidebar Session Manager with 3-Artifact Download)
+    loaded = st.session_state.get("loaded_sessions", {})
+    if loaded:
+        st.markdown("---")
+        col_lh1, col_lh2 = st.columns([0.72, 0.28])
+        with col_lh1:
+            st.markdown("##### 📁 로컬 세션 보관함")
+        with col_lh2:
+            if st.button("비우기", key="btn_clear_loaded", use_container_width=True):
+                st.session_state["loaded_sessions"] = {}
+                st.session_state["selected_session_key"] = None
+                st.rerun()
+
+        loaded_keys = list(loaded.keys())
+        current_k = st.session_state.get("selected_session_key")
+        if current_k not in loaded_keys:
+            current_k = loaded_keys[0]
+            st.session_state["selected_session_key"] = current_k
+
+        for sk in loaded_keys:
+            safe_display_name = str(sk).replace('~', r'\~')
+            is_cur = (sk == current_k)
+            expander_title = f"{'🟢' if is_cur else '⚪'} {safe_display_name}"
+
+            col_exp, col_del = st.columns([0.84, 0.16])
+            with col_exp:
+                with st.expander(expander_title, expanded=is_cur):
+                    if not is_cur:
+                        if st.button("🗺️ 이 세션 보기", key=f"btn_v_{sk}", use_container_width=True):
+                            st.session_state["selected_session_key"] = sk
+                            st.rerun()
+
+                    sess_path = loaded[sk]
+                    s_art = load_session_artifacts(sess_path)
+
+                    # 3 Artifact Download Buttons (Meta.json excluded as requested)
+                    if s_art["excel_file"] and os.path.exists(s_art["excel_file"]):
+                        with open(s_art["excel_file"], "rb") as f_ex:
+                            st.download_button(
+                                label="📊 통합 마스터 엑셀 (.xlsx)",
+                                data=f_ex.read(),
+                                file_name=os.path.basename(s_art["excel_file"]),
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key=f"dl_ex_{sk}",
+                                use_container_width=True
+                            )
+
+                    if s_art["map_file"] and os.path.exists(s_art["map_file"]):
+                        with open(s_art["map_file"], "rb") as f_mp:
+                            st.download_button(
+                                label="🗺️ 2D 대화형 맵 (.html)",
+                                data=f_mp.read(),
+                                file_name=os.path.basename(s_art["map_file"]),
+                                mime="text/html",
+                                key=f"dl_mp_{sk}",
+                                use_container_width=True
+                            )
+
+                    if s_art["report_file"] and os.path.exists(s_art["report_file"]):
+                        with open(s_art["report_file"], "rb") as f_rp:
+                            st.download_button(
+                                label="📋 종합 진단 리포트 (.txt)",
+                                data=f_rp.read(),
+                                file_name=os.path.basename(s_art["report_file"]),
+                                mime="text/plain",
+                                key=f"dl_rp_{sk}",
+                                use_container_width=True
+                            )
+
+            with col_del:
+                if st.button("✕", key=f"del_{sk}", use_container_width=True):
+                    del st.session_state["loaded_sessions"][sk]
+                    if st.session_state.get("selected_session_key") == sk:
+                        rem_k = list(st.session_state["loaded_sessions"].keys())
+                        st.session_state["selected_session_key"] = rem_k[0] if rem_k else None
+                    st.rerun()
 
     st.markdown("---")
     if st.button("🔄 화면 새로고침", use_container_width=True):
@@ -438,35 +535,28 @@ with st.sidebar:
 # =============================================================================
 # Main Content View
 # =============================================================================
-selected_session_path = st.session_state.get("active_session_path")
-selected_session_name = st.session_state.get("active_session_name")
+active_key = st.session_state.get("selected_session_key")
+loaded_sessions = st.session_state.get("loaded_sessions", {})
 
-if not selected_session_path or not os.path.exists(selected_session_path):
-    st.info("👈 좌측 사이드바에서 원격 세션을 조회하여 불러오거나, 산출물 파일(ZIP/HTML/XLSX)을 직접 업로드해 주세요.")
+if not active_key or active_key not in loaded_sessions or not os.path.exists(loaded_sessions[active_key]):
+    st.info("👈 좌측 사이드바에서 [🔄 FTP 세션 목록 조회]를 눌러 분석할 세션을 불러와 주세요.")
     st.stop()
+
+selected_session_path = loaded_sessions[active_key]
+selected_session_name = active_key
 
 # Load Artifacts
 art = load_session_artifacts(selected_session_path)
 extracted_meta = extract_embedded_data_from_map(art["map_html"])
+ports_data = extracted_meta.get("ports_data", {})
 
-# Top Status Header
-col_h1, col_h2 = st.columns([3, 1])
-with col_h1:
-    st.markdown(f"## 📁 {selected_session_name}")
-    st.caption(f"경로: `{selected_session_path}` | 망 모드: `{extracted_meta.get('network_mode', 'LTE')}`")
+# Top Status Header - Full Width, No duplicate download button
+net_mode = extracted_meta.get('network_mode', 'LTE')
+total_pts = extracted_meta.get('total_pts', len(ports_data.get('M1', [])))
+total_eps = extracted_meta.get('total_episodes', '-')
 
-with col_h2:
-    st.markdown("<div style='text-align: right; padding-top: 10px;'>", unsafe_allow_html=True)
-    if art["excel_file"] and os.path.exists(art["excel_file"]):
-        with open(art["excel_file"], "rb") as fe:
-            st.download_button(
-                label="📥 Master Excel 다운로드",
-                data=fe.read(),
-                file_name=os.path.basename(art["excel_file"]),
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
-    st.markdown("</div>", unsafe_allow_html=True)
+st.markdown(f"## 📁 {selected_session_name}")
+st.caption(f"경로: `{selected_session_path}` | 망 모드: `{net_mode}` | 총 포인트: `{total_pts}` | 장애 에피소드: `{total_eps}`")
 
 # Tabs
 tab_map, tab_params, tab_graph, tab_report = st.tabs([
@@ -482,7 +572,7 @@ tab_map, tab_params, tab_graph, tab_report = st.tabs([
 # -----------------------------------------------------------------------------
 with tab_map:
     if art["map_html"]:
-        components.html(art["map_html"], height=900, scrolling=True)
+        components.html(art["map_html"], height=860, scrolling=True)
     else:
         st.warning("⚠️ 해당 세션에 Map HTML 산출물이 존재하지 않습니다.")
 

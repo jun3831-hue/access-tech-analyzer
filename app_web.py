@@ -188,8 +188,15 @@ def discover_sftp_sessions(sftp, base_dir: str, max_depth: int = 3) -> dict:
         if has_map or has_master:
             sess_name = os.path.basename(curr_path.rstrip('/'))
             rel_parts = curr_path.replace(base_dir, '').strip('/').split('/')
-            user_id = rel_parts[-3] if len(rel_parts) >= 3 else "-"
-            upload_date = rel_parts[-2] if len(rel_parts) >= 2 else "-"
+            registrant = rel_parts[-3] if len(rel_parts) >= 3 else "-"
+            raw_up_date = rel_parts[-2] if len(rel_parts) >= 2 else "-"
+
+            # Standardize upload_date to YYYY-MM-DD
+            if len(raw_up_date) == 6 and raw_up_date.isdigit():
+                upload_date = f"20{raw_up_date[:2]}-{raw_up_date[2:4]}-{raw_up_date[4:6]}"
+            else:
+                m_up = re.search(r'(\d{4}[-/\.]\d{2}[-/\.]\d{2})', raw_up_date)
+                upload_date = m_up.group(1).replace('.', '-').replace('/', '-') if m_up else raw_up_date
 
             measured_date = "-"
             meta_fn = next((f for f in session_files if f.lower().endswith('_meta.json')), None)
@@ -199,16 +206,32 @@ def discover_sftp_sessions(sftp, base_dir: str, max_depth: int = 3) -> dict:
                         meta_obj = json.load(f_meta)
                         m_raw = meta_obj.get("measured_date") or meta_obj.get("measurement_date")
                         if m_raw and str(m_raw) != "-":
-                            m_match = re.search(r'(\d{4}[-/]\d{2}[-/]\d{2})', str(m_raw))
-                            measured_date = m_match.group(1).replace('/', '-') if m_match else str(m_raw)[:10]
+                            m_match = re.search(r'(\d{4}[-/\.]\d{2}[-/\.]\d{2})', str(m_raw))
+                            measured_date = m_match.group(1).replace('.', '-').replace('/', '-') if m_match else str(m_raw)[:10]
                 except Exception:
                     pass
 
-            if measured_date == "-" and len(upload_date) == 6 and upload_date.isdigit():
-                measured_date = f"20{upload_date[:2]}-{upload_date[2:4]}-{upload_date[4:6]}"
+            # Fallback 1: Extract date_str directly from _Map.html if meta has no date
+            if measured_date == "-":
+                map_fn = next((f for f in session_files if f.lower().endswith('.html')), None)
+                if map_fn:
+                    try:
+                        with sftp.open(f"{curr_path.rstrip('/')}/{map_fn}", 'r') as f_map:
+                            chunk = f_map.read(65536).decode('utf-8', errors='ignore')
+                            m_d = re.search(r'date_str["\']?\s*:\s*["\']([^"\']+)["\']', chunk)
+                            if not m_d:
+                                m_d = re.search(r'측정 일시:\s*<b>(\d{4}[\.\-/]\d{2}[\.\-/]\d{2})', chunk)
+                            if m_d:
+                                measured_date = m_d.group(1).replace('.', '-').replace('/', '-')
+                    except Exception:
+                        pass
+
+            # Fallback 2: If still unextracted, use upload_date
+            if measured_date == "-":
+                measured_date = upload_date
 
             found[curr_path] = {
-                "user_id": user_id,
+                "user_id": registrant,
                 "upload_date": upload_date,
                 "measured_date": measured_date,
                 "session_name": sess_name,
@@ -224,11 +247,11 @@ def discover_sftp_sessions(sftp, base_dir: str, max_depth: int = 3) -> dict:
     return found
 
 
-@st.dialog("🌐 원격 SFTP 세션 선택", width="large")
+@st.dialog("🌐 FTP 세션 선택", width="large")
 def show_sftp_session_dialog():
     discovered = st.session_state.get("sftp_discovered_sessions", {})
     if not discovered:
-        st.warning("원격 SFTP 경로에서 탐색된 세션이 없습니다.")
+        st.warning("원격 FTP 경로에서 탐색된 세션이 없습니다.")
         if st.button("닫기", use_container_width=True):
             st.session_state["show_sftp_dialog"] = False
             st.rerun()
@@ -239,11 +262,11 @@ def show_sftp_session_dialog():
     # 4-Column Search Filters
     col_f1, col_f2, col_f3, col_f4 = st.columns(4)
     with col_f1:
-        f_user = st.text_input("🔍 사번 검색", key="dlg_filter_user", placeholder="예: skt1110018")
+        f_user = st.text_input("🔍 등록자 검색", key="dlg_filter_user", placeholder="예: 전광용")
     with col_f2:
-        f_up_date = st.text_input("🔍 업로드일", key="dlg_filter_up_date", placeholder="예: 260914")
+        f_up_date = st.text_input("🔍 업로드일", key="dlg_filter_up_date", placeholder="예: 2026-09-14")
     with col_f3:
-        f_meas_date = st.text_input("🔍 측정일", key="dlg_filter_meas_date", placeholder="예: 2026-09-14")
+        f_meas_date = st.text_input("🔍 측정일", key="dlg_filter_meas_date", placeholder="예: 2025-07-15")
     with col_f4:
         f_name = st.text_input("🔍 세션명 검색", key="dlg_filter_name", placeholder="예: 충주")
 
@@ -266,7 +289,7 @@ def show_sftp_session_dialog():
 
         rows.append({
             "선택": False,
-            "사번": u,
+            "등록자": u,
             "업로드 날짜": up_d,
             "측정 날짜": m_d,
             "세션명": s
@@ -290,7 +313,7 @@ def show_sftp_session_dialog():
         use_container_width=True,
         column_config={
             "선택": st.column_config.CheckboxColumn("선택", default=False),
-            "사번": st.column_config.TextColumn("사번", disabled=True),
+            "등록자": st.column_config.TextColumn("등록자", disabled=True),
             "업로드 날짜": st.column_config.TextColumn("업로드 날짜", disabled=True),
             "측정 날짜": st.column_config.TextColumn("측정 날짜", disabled=True),
             "세션명": st.column_config.TextColumn("세션명", disabled=True),
@@ -518,7 +541,7 @@ with st.sidebar:
         if not HAS_PARAMIKO:
             st.error("paramiko 모듈이 설치되어 있지 않습니다.")
         else:
-            with st.spinner("원격 SFTP 서버 세션 탐색 중..."):
+            with st.spinner("FTP 세션 목록 조회 중..."):
                 try:
                     t = paramiko.Transport((DEFAULT_SFTP_CONFIG["host"], int(DEFAULT_SFTP_CONFIG["port"])))
                     t.connect(username=DEFAULT_SFTP_CONFIG["user"], password=DEFAULT_SFTP_CONFIG["pass"])

@@ -58,34 +58,21 @@ st.markdown("""
     #MainMenu { display: none !important; }
     footer { display: none !important; }
 
-    /* Safe container padding - 3.2rem top margin, 0px bottom, 0rem sides for full viewport */
-    .main .block-container {
+    /* Main container padding - 3.2rem safe margin */
+    .block-container {
         padding-top: 3.2rem !important;
         padding-bottom: 0px !important;
-        padding-left: 0rem !important;
-        padding-right: 0rem !important;
+        padding-left: 0.5rem !important;
+        padding-right: 0.5rem !important;
         max-width: 100% !important;
     }
 
-    /* Tabs styling - compact and crisp */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 6px;
-        margin-bottom: 4px;
-        padding-left: 0.5rem !important;
-    }
-    .stTabs [data-baseweb="tab"] {
-        padding: 4px 14px;
-        font-weight: 700;
-        font-size: 13px;
-        border-radius: 6px;
-    }
-
-    /* Full-display Map iframe styling - fits viewport cleanly */
+    /* Map iframe styling - fits viewport cleanly */
     iframe {
         width: 100% !important;
         height: calc(100vh - 4.2rem) !important;
         border: none !important;
-        border-radius: 0px;
+        border-radius: 8px;
     }
 
     /* Sidebar width & compact button styling */
@@ -202,11 +189,28 @@ def discover_sftp_sessions(sftp, base_dir: str, max_depth: int = 3) -> dict:
             sess_name = os.path.basename(curr_path.rstrip('/'))
             rel_parts = curr_path.replace(base_dir, '').strip('/').split('/')
             user_id = rel_parts[-3] if len(rel_parts) >= 3 else "-"
-            date_str = rel_parts[-2] if len(rel_parts) >= 2 else "-"
+            upload_date = rel_parts[-2] if len(rel_parts) >= 2 else "-"
+
+            measured_date = "-"
+            meta_fn = next((f for f in session_files if f.lower().endswith('_meta.json')), None)
+            if meta_fn:
+                try:
+                    with sftp.open(f"{curr_path.rstrip('/')}/{meta_fn}", 'r') as f_meta:
+                        meta_obj = json.load(f_meta)
+                        m_raw = meta_obj.get("measured_date") or meta_obj.get("measurement_date")
+                        if m_raw and str(m_raw) != "-":
+                            m_match = re.search(r'(\d{4}[-/]\d{2}[-/]\d{2})', str(m_raw))
+                            measured_date = m_match.group(1).replace('/', '-') if m_match else str(m_raw)[:10]
+                except Exception:
+                    pass
+
+            if measured_date == "-" and len(upload_date) == 6 and upload_date.isdigit():
+                measured_date = f"20{upload_date[:2]}-{upload_date[2:4]}-{upload_date[4:6]}"
 
             found[curr_path] = {
                 "user_id": user_id,
-                "date": date_str,
+                "upload_date": upload_date,
+                "measured_date": measured_date,
                 "session_name": sess_name,
                 "remote_dir": curr_path,
                 "files": session_files
@@ -232,25 +236,30 @@ def show_sftp_session_dialog():
 
     st.markdown("##### 📁 다운로드할 세션을 선택하세요 (복수 선택 가능)")
 
-    # 3-Column Search Filters
-    col_f1, col_f2, col_f3 = st.columns(3)
+    # 4-Column Search Filters
+    col_f1, col_f2, col_f3, col_f4 = st.columns(4)
     with col_f1:
         f_user = st.text_input("🔍 사번 검색", key="dlg_filter_user", placeholder="예: skt1110018")
     with col_f2:
-        f_date = st.text_input("🔍 일자 검색", key="dlg_filter_date", placeholder="예: 260914")
+        f_up_date = st.text_input("🔍 업로드일", key="dlg_filter_up_date", placeholder="예: 260914")
     with col_f3:
+        f_meas_date = st.text_input("🔍 측정일", key="dlg_filter_meas_date", placeholder="예: 2026-09-14")
+    with col_f4:
         f_name = st.text_input("🔍 세션명 검색", key="dlg_filter_name", placeholder="예: 충주")
 
     rows = []
     filtered_path_keys = []
     for k, item in discovered.items():
         u = str(item.get("user_id", "-"))
-        d = str(item.get("date", "-"))
+        up_d = str(item.get("upload_date", "-"))
+        m_d = str(item.get("measured_date", "-"))
         s = str(item.get("session_name", "-"))
 
         if f_user and f_user.strip().lower() not in u.lower():
             continue
-        if f_date and f_date.strip().lower() not in d.lower():
+        if f_up_date and f_up_date.strip().lower() not in up_d.lower():
+            continue
+        if f_meas_date and f_meas_date.strip().lower() not in m_d.lower():
             continue
         if f_name and f_name.strip().lower() not in s.lower():
             continue
@@ -258,7 +267,8 @@ def show_sftp_session_dialog():
         rows.append({
             "선택": False,
             "사번": u,
-            "측정 일자": d,
+            "업로드 날짜": up_d,
+            "측정 날짜": m_d,
             "세션명": s
         })
         filtered_path_keys.append(k)
@@ -281,7 +291,8 @@ def show_sftp_session_dialog():
         column_config={
             "선택": st.column_config.CheckboxColumn("선택", default=False),
             "사번": st.column_config.TextColumn("사번", disabled=True),
-            "측정 일자": st.column_config.TextColumn("측정 일자", disabled=True),
+            "업로드 날짜": st.column_config.TextColumn("업로드 날짜", disabled=True),
+            "측정 날짜": st.column_config.TextColumn("측정 날짜", disabled=True),
             "세션명": st.column_config.TextColumn("세션명", disabled=True),
         },
         height=min(400, 50 + len(rows) * 35),
@@ -610,7 +621,6 @@ with st.sidebar:
     if st.button("🔄 화면 새로고침", use_container_width=True):
         st.rerun()
 
-
 # =============================================================================
 # Main Content View
 # =============================================================================
@@ -626,150 +636,12 @@ selected_session_name = active_key
 
 # Load Artifacts
 art = load_session_artifacts(selected_session_path)
-extracted_meta = extract_embedded_data_from_map(art["map_html"])
-ports_data = extracted_meta.get("ports_data", {})
 
-# Tabs
-tab_map, tab_params, tab_graph, tab_report = st.tabs([
-    "🗺️ 지도 및 타임라인 분석",
-    "⚙️ 측정 파라미터 비교",
-    "📈 시계열 정밀 그래프",
-    "📋 품질 진단 보고서 & 요약"
-])
-
-
-# -----------------------------------------------------------------------------
-# TAB 1: Interactive 2D Map & Timeline
-# -----------------------------------------------------------------------------
-with tab_map:
-    if art["map_html"]:
-        components.html(art["map_html"], height=860, scrolling=True)
-    else:
-        st.warning("⚠️ 해당 세션에 Map HTML 산출물이 존재하지 않습니다.")
-
-
-# -----------------------------------------------------------------------------
-# TAB 2: BS Parameter Comparison
-# -----------------------------------------------------------------------------
-with tab_params:
-    st.markdown("### ⚙️ 기지국 핵심 파라미터 및 설정 일치성 검사")
-    st.caption("3GPP TS 38.331 / 36.331 L3 시그널링 기반 셀 파라미터 및 임계치 검증 결과")
-
-    p_struct = extracted_meta.get("param_struct", [])
-    p_scalar = extracted_meta.get("param_scalar", [])
-
-    col_srch, col_filt = st.columns([2, 1])
-    with col_srch:
-        srch_query = st.text_input("🔍 파라미터 검색 (항목명, 메시지, 값)", "").strip().lower()
-
-    st.markdown("#### 📋 기지국 핵심 복합 파라미터 / 임계치 비교 매트릭스")
-    if p_struct:
-        df_struct = pd.DataFrame(p_struct)
-        rename_map = {
-            "category": "메시지 분류",
-            "param_name": "파라미터 / 항목 명",
-            "rank1": "1위 정책군 (최빈값 / 점유율)",
-            "rank2": "2위 정책군 (차순위 / 점유율)",
-            "rank3_outliers": "3위/특이 설정값 (소수 기지국)"
-        }
-        df_struct = df_struct.rename(columns=rename_map)
-
-        if srch_query:
-            mask = df_struct.astype(str).apply(lambda row: row.str.lower().str.contains(srch_query).any(), axis=1)
-            df_struct_filtered = df_struct[mask]
-        else:
-            df_struct_filtered = df_struct
-
-        st.dataframe(df_struct_filtered, use_container_width=True, hide_index=True)
-    else:
-        st.info("검출된 구조체 파라미터 데이터가 없거나 Map 파일에서 로드되지 않았습니다.")
-
-    st.markdown("---")
-    st.markdown("#### ⚖️ 기지국 단일 스칼라 파라미터 불일치 분석")
-    if p_scalar:
-        df_scalar = pd.DataFrame(p_scalar)
-        rename_scalar = {
-            "param_name": "파라미터 명",
-            "val_m1": "M1 (DL)",
-            "val_m2": "M2 (UL)",
-            "val_m3": "M3 (Voice)",
-            "val_m4": "M4 (Voice)",
-            "status": "일치 판정"
-        }
-        df_scalar = df_scalar.rename(columns=rename_scalar)
-
-        if srch_query:
-            mask_s = df_scalar.astype(str).apply(lambda row: row.str.lower().str.contains(srch_query).any(), axis=1)
-            df_scalar_filtered = df_scalar[mask_s]
-        else:
-            df_scalar_filtered = df_scalar
-
-        st.dataframe(df_scalar_filtered, use_container_width=True, hide_index=True)
-    else:
-        st.info("검출된 스칼라 파라미터 데이터가 없습니다.")
-
-
-# -----------------------------------------------------------------------------
-# TAB 3: Time-Series Dual Mode Graph (Plotly)
-# -----------------------------------------------------------------------------
-with tab_graph:
-    st.markdown("### 📈 세션 시계열 정밀 분석 그래프")
-    st.caption("독립형 HTML 대시보드(탭1) 내의 동적 시계열 차트를 활용하거나, 아래 보조 Plotly 차트를 이용할 수 있습니다.")
-
-    ports_data = extracted_meta.get("ports_data", {})
-    if not ports_data:
-        st.info("시계열 추출 데이터가 없습니다. 탭 1의 인터랙티브 대시보드를 직접 이용해 주세요.")
-    else:
-        avail_ports = list(ports_data.keys())
-        c_p1, c_p2 = st.columns([1, 2])
-        with c_p1:
-            sel_ports = st.multiselect("분석 대상 단말(Port) 선택", avail_ports, default=avail_ports[:1])
-        with c_p2:
-            metrics_opts = [
-                ("rsrp", "LTE PCell RSRP (dBm)"),
-                ("sinr", "LTE PCell SINR (dB)"),
-                ("lte_mac_tp", "LTE MAC Total (Mbps)"),
-                ("dl_tp", "App DL 속도 (Mbps)"),
-                ("pci", "LTE PCell PCI"),
-                ("speed", "이동속도 (km/h)")
-            ]
-            sel_metric_key = st.selectbox("표시 지표", [k for k, v in metrics_opts], format_func=lambda x: next(v for k, v in metrics_opts if k == x))
-
-        if sel_ports and HAS_PLOTLY:
-            fig = go.Figure()
-            for pk in sel_ports:
-                p_pts = ports_data[pk].get("points", [])
-                x_times = [p.get("time") for p in p_pts]
-                y_vals = []
-                for p in p_pts:
-                    v = p.get(sel_metric_key)
-                    if v is None and p.get("raw"):
-                        v = p["raw"].get(sel_metric_key)
-                    y_vals.append(v)
-
-                fig.add_trace(go.Scatter(
-                    x=x_times,
-                    y=y_vals,
-                    mode='lines+markers',
-                    name=pk,
-                    connectgaps=False
-                ))
-
-            fig.update_layout(
-                template="plotly_dark",
-                height=350,
-                margin=dict(l=40, r=20, t=30, b=40),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-
-# -----------------------------------------------------------------------------
-# TAB 4: Diagnosis Report & Summary
-# -----------------------------------------------------------------------------
-with tab_report:
-    st.markdown("### 📋 AI 종합 품질 진단 보고서")
-    if art["report_txt"]:
-        st.text_area("Report Content", art["report_txt"], height=600)
-    else:
-        st.info("⚠️ 생성된 텍스트 보고서(_Report.txt)가 없습니다.")
+if art["map_html"]:
+    components.html(
+        art["map_html"],
+        height=940,
+        scrolling=False
+    )
+else:
+    st.warning("⚠️ 해당 세션에 Map HTML 산출물이 존재하지 않습니다.")

@@ -265,28 +265,12 @@ with st.sidebar:
     st.markdown("### 📡 DM AI Web Analyzer")
     st.caption("초경량 세션 직결 대시보드 v1.0")
 
-    data_source = st.radio("데이터 소스", ["📁 로컬 산출물", "📤 파일 직접 업로드", "🌐 원격 SFTP 서버"], index=0)
+    data_source = st.radio("데이터 소스", ["📤 파일 직접 업로드", "🌐 원격 SFTP 서버"], index=0)
 
     selected_session_path = None
     selected_session_name = None
 
-    if data_source == "📁 로컬 산출물":
-        sessions_dict = discover_local_sessions()
-
-        if not sessions_dict:
-            st.warning("로컬 산출물 폴더에 생성된 세션이 없습니다.")
-            st.info(f"검색 경로:\n{DM_OUTPUT_DIR}\n{LOCAL_SESSIONS_DIR}")
-        else:
-            dates = list(sessions_dict.keys())
-            sel_date = st.selectbox("측정 일자", dates, index=0)
-
-            sess_options = list(sessions_dict[sel_date].keys())
-            sel_sess = st.selectbox("세션 선택", sess_options, index=0)
-
-            selected_session_path = sessions_dict[sel_date][sel_sess]
-            selected_session_name = sel_sess
-
-    elif data_source == "📤 파일 직접 업로드":
+    if data_source == "📤 파일 직접 업로드":
         st.markdown("**세션 산출물 업로드 (ZIP 또는 개별 파일)**")
         uploaded_file = st.file_uploader("세션 ZIP 파일 업로드", type=["zip", "html", "xlsx"])
         if uploaded_file is not None:

@@ -305,6 +305,16 @@ def show_sftp_session_dialog():
         return
 
     df = pd.DataFrame(rows)
+    df["_path_key"] = filtered_path_keys
+
+    # 사번(오름차순) -> 업로드일(내림차순/최신순) -> 측정일(내림차순/최신순) -> 세션명(오름차순/가나다순)
+    df = df.sort_values(
+        by=["등록자", "업로드 날짜", "측정 날짜", "세션명"],
+        ascending=[True, False, False, True]
+    ).reset_index(drop=True)
+
+    filtered_path_keys = df["_path_key"].tolist()
+    df = df.drop(columns=["_path_key"])
 
     edited_df = st.data_editor(
         df,
